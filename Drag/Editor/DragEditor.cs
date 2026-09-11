@@ -1,0 +1,579 @@
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEngine;
+using System.Collections.Generic;
+
+[CustomEditor(typeof(Drag))]
+[CanEditMultipleObjects]
+public class DragEditor : Editor
+{
+
+    private enum EPath  { Linear = 0, Curve = 1 }
+    private enum ESpeed { Fixed = 0, Curve = 1 }
+    private enum EMotion { Move = 0, Rotate = 1 }
+    private enum ERotPath { Spherical = 0, Axis = 1 }
+
+    private Drag _drag;
+    private readonly Dictionary<string, SerializedProperty> _props = new Dictionary<string, SerializedProperty>();
+
+    private string[][] _destModeNames, _interactModeNames, _loopModeNames, _movePathNames, _speedModeNames, _motionModeNames, _rotatePathNames;
+
+    private void InitTexts()
+    {
+        _destModeNames = new[]
+        {
+            new[] { "Offset Vector", "Destination Transform", "Path Points" },
+            new[] { "オフセットベクトル", "目的地トランスフォーム", "パスポイント" },
+            new[] { "偏移向量", "目标变换", "路径点" }
+        };
+        _interactModeNames = new[]
+        {
+            new[] { "Interact (Click Trigger)", "Drag (Drag Trigger)" },
+            new[] { "インタラクト (クリック)", "ドラッグ (ドラッグ)" },
+            new[] { "交互触发 (点击)", "拖动控制 (拖拽)" }
+        };
+        _loopModeNames = new[]
+        {
+            new[] { "Loop", "PingPong" },
+            new[] { "ループ", "往復" },
+            new[] { "循环", "往返" }
+        };
+        _movePathNames = new[]
+        {
+            new[] { "Linear", "Curve" },
+            new[] { "直線", "曲線" },
+            new[] { "直线", "曲线" }
+        };
+        _speedModeNames = new[]
+        {
+            new[] { "Fixed (Number)", "Curve (Graph)" },
+            new[] { "固定 (数字)", "曲線 (グラフ)" },
+            new[] { "固定 (数字)", "曲线 (函数图)" }
+        };
+        _motionModeNames = new[]
+        {
+            new[] { "Move", "Rotate" },
+            new[] { "移動", "回転" },
+            new[] { "移动", "旋转" }
+        };
+        _rotatePathNames = new[]
+        {
+            new[] { "Spherical", "Axis" },
+            new[] { "球面", "軸" },
+            new[] { "球状旋转", "轴旋转" }
+        };
+    }
+
+    private int Lang => (Get("language")?.enumValueIndex ?? 2);
+    private string T(string k) => GetText(Lang, k);
+
+    private string GetText(int l, string k)
+    {
+        switch (k)
+        {
+            case "Core":         return new[] { "Core", "コア", "核心设置" }[l];
+            case "Preview":      return new[] { "Preview", "プレビュー", "预览设置" }[l];
+            case "Language":     return new[] { "Language", "言語", "语言" }[l];
+            case "Target":       return new[] { "Target", "ターゲット", "目标物体" }[l];
+            case "DestMode":     return new[] { "Destination Mode", "目的地モード", "目的地模式" }[l];
+            case "InteractMode": return new[] { "Interaction Mode", "交互モード", "交互模式" }[l];
+            case "TriggerObj":   return new[] { "Trigger Object", "トリガー", "触发物体" }[l];
+            case "OffsetVec":    return new[] { "Offset Vector", "オフセット", "偏移向量" }[l];
+            case "RotVec":       return new[] { "Rotation Vector", "回転ベクトル", "旋转向量" }[l];
+            case "PathPoints":   return new[] { "Path Points", "パスポイント", "路径点" }[l];
+            case "LoopMode":     return new[] { "Loop Mode", "ループ", "循环模式" }[l];
+            case "OnReach":      return new[] { "On Reach Destination", "到達イベント", "到达触发事件" }[l];
+            case "Param":        return new[] { "Parameter", "パラメータ", "参数设置" }[l];
+            case "MovePath":     return new[] { "Move Path", "移動パス", "移动路径" }[l];
+            case "SpeedMode":    return new[] { "Speed Mode", "速度モード", "速度模式" }[l];
+            case "MoveSpeed":    return new[] { "Move Speed", "移動速度", "移动速度" }[l];
+            case "SpeedCurve":   return new[] { "Speed Curve", "速度曲線", "速度曲线" }[l];
+            case "MoveCurve":    return new[] { "Move Curve", "移動曲線", "移动曲线" }[l];
+            case "Drag":         return new[] { "Drag", "阻力", "阻力" }[l];
+            case "Gravity":      return new[] { "Gravity Scale", "重力スケール", "重力缩放" }[l];
+            case "AutoOrigin":   return new[] { "Auto Origin (Midpoint)", "自動原点(中点)", "自动原点(中点)" }[l];
+            case "CurveOrigin":  return new[] { "Curve Origin (P)", "曲線原点(P)", "曲线原点(P)" }[l];
+            case "PreviewDest":  return new[] { "Preview Destination", "目的地プレビュー", "预览目的地" }[l];
+            case "PreviewPath":  return new[] { "Preview Path", "パスプレビュー", "预览路径" }[l];
+            case "PreviewMesh":  return new[] { "Preview Mesh", "プレビューメッシュ", "预览网格" }[l];
+            case "MotionMode":   return new[] { "Motion Mode", "動作モード", "运动方式" }[l];
+            case "RotatePath":   return new[] { "Rotate Path", "回転パス", "旋转路径" }[l];
+            case "AxisStart":    return new[] { "Axis Start", "軸の始点", "轴起点" }[l];
+            case "AxisEnd":      return new[] { "Axis End", "軸の終点", "轴终点" }[l];
+            case "AxisAngle":    return new[] { "Axis Angle (deg)", "軸角度 (度)", "轴角度 (度)" }[l];
+            case "EditEnd":      return new[] { "Drag Destination (Offset mode)", "終点をドラッグ（オフセット）", "拖拽终点（位移模式）" }[l];
+            case "CurveHelp":    return new[] { "Curve Y = arch height (1 = path length).\nYellow P handle: drag freely or per-axis in the Scene view.", "曲線のY軸＝アーチ高（1＝経路全長）。\nシーンビューで黄色のPハンドルをドラッグ（自由／単軸）。", "曲线 Y 轴 = 拱桥高度 (1格 = 路径全长)。\n原点 P 手柄可在 Scene 视图 XYZ 任意拖 / 单轴拖。" }[l];
+            default:             return k;
+        }
+    }
+
+    private SerializedProperty Get(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        return _props.TryGetValue(name, out var p) ? p : null;
+    }
+
+    private void CacheProperty(string primary, params string[] aliases)
+    {
+        var list = new List<string> { primary };
+        if (aliases != null) list.AddRange(aliases);
+        foreach (var n in list)
+        {
+            if (string.IsNullOrEmpty(n)) continue;
+            if (_props.ContainsKey(n)) return;
+            var prop = serializedObject.FindProperty(n);
+            if (prop != null)
+            {
+                _props[n] = prop;
+                return;
+            }
+        }
+    }
+
+    private void OnEnable()
+    {
+        _drag = (Drag)target;
+        InitTexts();
+        _props.Clear();
+
+        CacheProperty("language");
+        CacheProperty("target");
+        CacheProperty("destinationMode");
+        CacheProperty("interactionMode");
+        CacheProperty("trigger", "triggerObject", "triggerTransform");
+        CacheProperty("offsetVector");
+        CacheProperty("rotationVector");
+        CacheProperty("destinationTransform");
+        CacheProperty("relativePositionOffset");
+        CacheProperty("relativeRotationOffset");
+        CacheProperty("pathPoints");
+        CacheProperty("loopMode");
+        CacheProperty("onReachDestination", "arriveEvent");
+
+        CacheProperty("motionMode");
+        CacheProperty("rotatePathMode", "rotationPathMode");
+        CacheProperty("axisStart", "axisStartPoint");
+        CacheProperty("axisEnd", "axisEndPoint");
+        CacheProperty("axisAngle", "rotationAngle");
+        CacheProperty("movePathMode", "movePath");
+        CacheProperty("speedMode");
+        CacheProperty("moveSpeed", "speed");
+        CacheProperty("speedCurve");
+        CacheProperty("moveCurve");
+        CacheProperty("drag");
+        CacheProperty("gravityScale");
+
+        CacheProperty("autoCurveOrigin", "autoOrigin");
+        CacheProperty("curveOrigin");
+
+        CacheProperty("previewDestination");
+        CacheProperty("previewPath");
+        CacheProperty("editEndPosition");
+        CacheProperty("previewMesh");
+
+        var required = new[] { "trigger", "movePathMode", "previewDestination" };
+        var missing = new List<string>();
+        foreach (var r in required)
+        {
+            bool found = false;
+            if (r == "trigger") found = Get("trigger") != null || Get("triggerObject") != null || Get("triggerTransform") != null;
+            else if (r == "movePathMode") found = Get("movePathMode") != null || Get("movePath") != null;
+            else found = Get(r) != null;
+            if (!found) missing.Add(r);
+        }
+        if (missing.Count > 0)
+            Debug.LogWarning("[DragEditor] Drag.cs 中未找到关键字段（请核对命名）: " + string.Join(", ", missing));
+    }
+
+    private void Draw(string name, string label)
+    {
+        var p = Get(name);
+        if (p != null) EditorGUILayout.PropertyField(p, new GUIContent(label));
+    }
+
+    private void DrawAlias(string[] names, string label)
+    {
+        foreach (var n in names)
+        {
+            var p = Get(n);
+            if (p != null)
+            {
+                EditorGUILayout.PropertyField(p, new GUIContent(label));
+                return;
+            }
+        }
+    }
+
+    public override void OnInspectorGUI()
+    {
+        serializedObject.Update();
+
+        Draw("language", T("Language"));
+        EditorGUILayout.Space();
+
+        EditorGUILayout.LabelField(T("Core"), EditorStyles.boldLabel);
+        Draw("target", T("Target"));
+
+        var destMode = Get("destinationMode");
+        if (destMode != null)
+            destMode.enumValueIndex = EditorGUILayout.Popup(T("DestMode"), destMode.enumValueIndex, _destModeNames[Lang]);
+
+        var interactMode = Get("interactionMode");
+        if (interactMode != null)
+            interactMode.enumValueIndex = EditorGUILayout.Popup(T("InteractMode"), interactMode.enumValueIndex, _interactModeNames[Lang]);
+
+        DrawAlias(new[] { "trigger", "triggerObject", "triggerTransform" }, T("TriggerObj"));
+
+        int dMode = destMode != null ? destMode.enumValueIndex : 0;
+        if (dMode == 0)
+        {
+            Draw("offsetVector", T("OffsetVec"));
+            Draw("rotationVector", T("RotVec"));
+        }
+        else if (dMode == 1)
+        {
+            Draw("destinationTransform", T("DestMode"));
+            var destTrans = Get("destinationTransform");
+            bool noDest = destTrans != null && destTrans.objectReferenceValue == null;
+            using (new EditorGUI.DisabledScope(noDest))
+            {
+                Draw("relativePositionOffset", T("OffsetVec"));
+                Draw("relativeRotationOffset", T("RotVec"));
+            }
+        }
+        else if (dMode == 2)
+        {
+            Draw("pathPoints", T("PathPoints"));
+        }
+
+        var loopMode = Get("loopMode");
+        if (loopMode != null)
+            loopMode.enumValueIndex = EditorGUILayout.Popup(T("LoopMode"), loopMode.enumValueIndex, _loopModeNames[Lang]);
+        Draw("onReachDestination", T("OnReach"));
+
+        EditorGUILayout.Space();
+
+        EditorGUILayout.LabelField(T("Param"), EditorStyles.boldLabel);
+
+        var motionMode = Get("motionMode");
+        if (motionMode != null)
+            motionMode.enumValueIndex = EditorGUILayout.Popup(T("MotionMode"), motionMode.enumValueIndex, _motionModeNames[Lang]);
+        bool isRotate = motionMode != null && motionMode.enumValueIndex == (int)EMotion.Rotate;
+
+        var rotatePath = Get("rotatePathMode") ?? Get("rotationPathMode");
+        if (isRotate)
+        {
+            if (rotatePath != null)
+                rotatePath.enumValueIndex = EditorGUILayout.Popup(T("RotatePath"), rotatePath.enumValueIndex, _rotatePathNames[Lang]);
+            bool isAxis = rotatePath != null && rotatePath.enumValueIndex == (int)ERotPath.Axis;
+            if (isAxis)
+            {
+                Draw("axisStart", T("AxisStart"));
+                Draw("axisEnd", T("AxisEnd"));
+                Draw("axisAngle", T("AxisAngle"));
+            }
+            else
+            {
+                Draw("rotationVector", T("RotVec"));
+            }
+        }
+
+        var movePath = Get("movePathMode") ?? Get("movePath");
+        if (!isRotate)
+        {
+            if (movePath != null)
+                movePath.enumValueIndex = EditorGUILayout.Popup(T("MovePath"), movePath.enumValueIndex, _movePathNames[Lang]);
+        }
+        bool isCurve = !isRotate && movePath != null && movePath.enumValueIndex == (int)EPath.Curve;
+
+        var speedMode = Get("speedMode");
+        if (speedMode != null)
+            speedMode.enumValueIndex = EditorGUILayout.Popup(T("SpeedMode"), speedMode.enumValueIndex, _speedModeNames[Lang]);
+        int sm = speedMode != null ? speedMode.enumValueIndex : 0;
+
+        if (sm == (int)ESpeed.Fixed)
+        {
+            Draw("moveSpeed", T("MoveSpeed"));
+        }
+        else
+        {
+            Draw("speedCurve", T("SpeedCurve"));
+        }
+
+        if (isCurve)
+        {
+            Draw("moveCurve", T("MoveCurve"));
+            EditorGUILayout.HelpBox(T("CurveHelp"), MessageType.Info);
+            DrawAlias(new[] { "autoCurveOrigin", "autoOrigin" }, T("AutoOrigin"));
+            var auto = Get("autoCurveOrigin") ?? Get("autoOrigin");
+            using (new EditorGUI.DisabledScope(auto != null && auto.boolValue))
+                Draw("curveOrigin", T("CurveOrigin"));
+        }
+
+        Draw("drag", T("Drag"));
+        if (!isRotate)
+        {
+            Draw("gravityScale", T("Gravity"));
+        }
+
+        EditorGUILayout.Space();
+
+        EditorGUILayout.LabelField(T("Preview"), EditorStyles.boldLabel);
+        Draw("previewDestination", T("PreviewDest"));
+
+        if (dMode == 0 && !isRotate)
+        {
+            var previewDestToggle = Get("previewDestination");
+            using (new EditorGUI.DisabledScope(previewDestToggle == null || !previewDestToggle.boolValue))
+                Draw("editEndPosition", T("EditEnd"));
+        }
+        Draw("previewPath", T("PreviewPath"));
+        Draw("previewMesh", T("PreviewMesh"));
+
+        serializedObject.ApplyModifiedProperties();
+    }
+
+    private void OnSceneGUI()
+    {
+        if (_drag == null || _drag.target == null) return;
+
+        var previewDestProp = Get("previewDestination");
+        bool previewDestOn = previewDestProp != null && previewDestProp.boolValue;
+        var previewPathProp = Get("previewPath");
+        bool previewPathOn = previewPathProp != null && previewPathProp.boolValue;
+        var movePath = Get("movePathMode") ?? Get("movePath");
+        bool isCurve = movePath != null && movePath.enumValueIndex == (int)EPath.Curve;
+
+        Vector3 start = GetObjectCenter(_drag.target);
+        Vector3 end = GetDestinationCenter();
+        Quaternion endRot = GetDestinationRotation();
+
+        if (previewDestOn) DrawWireBoundsAtCenter(end, endRot, _drag.target);
+
+        var editEndProp = Get("editEndPosition");
+        var destModeProp = Get("destinationMode");
+        if (editEndProp != null && editEndProp.boolValue && previewDestOn
+            && (destModeProp == null || destModeProp.enumValueIndex == 0))
+        {
+            Vector3 endHandle = start + (Get("offsetVector")?.vector3Value ?? Vector3.zero);
+            Handles.color = Color.magenta;
+            EditorGUI.BeginChangeCheck();
+            Vector3 newEnd = Handles.PositionHandle(endHandle, Quaternion.identity);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(_drag, "Move Destination");
+                var ov = Get("offsetVector");
+                if (ov != null) ov.vector3Value = newEnd - start;
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(_drag);
+            }
+        }
+
+        if (isAxis)
+        {
+            var asProp = Get("axisStart");
+            var aeProp = Get("axisEnd");
+            Vector3 a = asProp != null ? asProp.vector3Value : Vector3.zero;
+            Vector3 b = aeProp != null ? aeProp.vector3Value : Vector3.up;
+
+            Handles.color = Color.cyan;
+            Handles.DrawLine(a, b);
+
+            Handles.color = Color.red;
+            EditorGUI.BeginChangeCheck();
+            Vector3 newA = Handles.PositionHandle(a, Quaternion.identity);
+            if (EditorGUI.EndChangeCheck() && asProp != null)
+            {
+                Undo.RecordObject(_drag, "Move Axis Start");
+                asProp.vector3Value = newA;
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(_drag);
+            }
+
+            Handles.color = Color.green;
+            EditorGUI.BeginChangeCheck();
+            Vector3 newB = Handles.PositionHandle(b, Quaternion.identity);
+            if (EditorGUI.EndChangeCheck() && aeProp != null)
+            {
+                Undo.RecordObject(_drag, "Move Axis End");
+                aeProp.vector3Value = newB;
+                serializedObject.ApplyModifiedProperties();
+                EditorUtility.SetDirty(_drag);
+            }
+        }
+
+        if (isRotate) return;
+
+        if (!previewPathOn) return;
+
+        var auto = Get("autoCurveOrigin") ?? Get("autoOrigin");
+        var co = Get("curveOrigin");
+        Vector3 P = (auto != null && auto.boolValue) ? (start + end) * 0.5f
+            : (co != null ? co.vector3Value : (start + end) * 0.5f);
+
+        Vector3 X = start - P;
+        Vector3 Y = end - P;
+
+        Vector3 planeNormal = Vector3.Cross(X, Y);
+        if (planeNormal.sqrMagnitude < 1e-6f) planeNormal = Vector3.Cross(X.normalized, Vector3.up);
+        planeNormal.Normalize();
+
+        if (!isCurve)
+        {
+            Handles.color = Color.cyan;
+            Handles.DrawLine(start, end);
+            return;
+        }
+
+        Vector3 baselineDir = end - start;
+        float pathLength = baselineDir.magnitude;
+        baselineDir = (pathLength > 1e-6f) ? baselineDir / pathLength : Vector3.forward;
+        Vector3 perp = Vector3.Cross(baselineDir, planeNormal).normalized;
+
+        Handles.color = Color.red;   Handles.DrawLine(P, start);
+        Handles.color = Color.green; Handles.DrawLine(P, end);
+
+        Handles.color = Color.cyan;
+        Vector3 prev = start;
+        var curveProp = Get("moveCurve");
+        AnimationCurve curve = curveProp?.animationCurveValue;
+        float v0 = (curve != null) ? curve.Evaluate(0f) : 0f;
+        float v1 = (curve != null) ? curve.Evaluate(1f) : 0f;
+        const int segments = 30;
+        for (int i = 1; i <= segments; i++)
+        {
+            float t = i / (float)segments;
+            float v = ((curve != null) ? curve.Evaluate(t) : 0f) - Mathf.Lerp(v0, v1, t);
+            Vector3 baseline = Vector3.Lerp(start, end, t);
+            Vector3 pt = baseline + perp * (v * pathLength);
+            Handles.DrawLine(prev, pt);
+            prev = pt;
+        }
+
+        Handles.color = Color.yellow;
+        EditorGUI.BeginChangeCheck();
+        Vector3 newP = Handles.PositionHandle(P, Quaternion.identity);
+        if (EditorGUI.EndChangeCheck())
+        {
+            Undo.RecordObject(_drag, "Move Curve Origin");
+            if (co != null) co.vector3Value = newP;
+            if (auto != null) auto.boolValue = false;
+            serializedObject.ApplyModifiedProperties();
+            EditorUtility.SetDirty(_drag);
+        }
+        Handles.SphereHandleCap(0, P, Quaternion.identity, HandleUtility.GetHandleSize(P) * 0.08f, EventType.Repaint);
+    }
+
+    private Vector3 GetObjectCenter(Transform obj)
+    {
+        if (obj == null) return Vector3.zero;
+
+        Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+        bool found = false;
+
+        foreach (var r in obj.GetComponentsInChildren<Renderer>(false))
+        {
+            if (r == null) continue;
+            min = Vector3.Min(min, r.bounds.min);
+            max = Vector3.Max(max, r.bounds.max);
+            found = true;
+        }
+        if (!found)
+        {
+            foreach (var c in obj.GetComponentsInChildren<Collider>(false))
+            {
+                if (c == null) continue;
+                min = Vector3.Min(min, c.bounds.min);
+                max = Vector3.Max(max, c.bounds.max);
+                found = true;
+            }
+        }
+        if (!found) return obj.position;
+        return (min + max) * 0.5f;
+    }
+
+    private Vector3 GetDestinationCenter()
+    {
+        var motionModeProp = Get("motionMode");
+        if (motionModeProp != null && motionModeProp.enumValueIndex == (int)EMotion.Rotate)
+        {
+            return GetObjectCenter(_drag.target);
+        }
+        var destMode = Get("destinationMode");
+        int d = destMode != null ? destMode.enumValueIndex : 0;
+        Vector3 start = GetObjectCenter(_drag.target);
+        if (d == 0) return start + (Get("offsetVector")?.vector3Value ?? Vector3.zero);
+        if (d == 1 && _drag.destinationTransform != null)
+            return GetObjectCenter(_drag.destinationTransform) + (Get("relativePositionOffset")?.vector3Value ?? Vector3.zero);
+        if (d == 2 && _drag.pathPoints != null && _drag.pathPoints.Length > 0 && _drag.pathPoints[_drag.pathPoints.Length - 1] != null)
+            return GetObjectCenter(_drag.pathPoints[_drag.pathPoints.Length - 1]);
+        return start;
+    }
+
+    private Quaternion GetDestinationRotation()
+    {
+        var motionModeProp = Get("motionMode");
+        if (motionModeProp != null && motionModeProp.enumValueIndex == (int)EMotion.Rotate)
+        {
+            var rp = Get("rotatePathMode") ?? Get("rotationPathMode");
+            if (rp != null && rp.enumValueIndex == (int)ERotPath.Axis)
+            {
+                Vector3 a = Get("axisStart") != null ? Get("axisStart").vector3Value : Vector3.zero;
+                Vector3 b = Get("axisEnd") != null ? Get("axisEnd").vector3Value : Vector3.up;
+                Vector3 axis = b - a;
+                if (axis.sqrMagnitude < 1e-8f) return _drag.target.rotation;
+                float ang = Get("axisAngle") != null ? Get("axisAngle").floatValue : 360f;
+                return _drag.target.rotation * Quaternion.AngleAxis(ang, axis.normalized);
+            }
+            Vector3 rv = Get("rotationVector") != null ? Get("rotationVector").vector3Value : Vector3.zero;
+            return _drag.target.rotation * Quaternion.Euler(rv);
+        }
+        var destMode = Get("destinationMode");
+        int d = destMode != null ? destMode.enumValueIndex : 0;
+        if (d == 0) return _drag.target.rotation * Quaternion.Euler(Get("rotationVector")?.vector3Value ?? Vector3.zero);
+        if (d == 1 && _drag.destinationTransform != null)
+            return _drag.destinationTransform.rotation * Quaternion.Euler(Get("relativeRotationOffset")?.vector3Value ?? Vector3.zero);
+        return _drag.target.rotation;
+    }
+
+    private void DrawWireBoundsAtCenter(Vector3 center, Quaternion rot, Transform src)
+    {
+        if (src == null) return;
+
+        Vector3 s;
+        var mf = src.GetComponent<MeshFilter>();
+        if (mf != null && mf.sharedMesh != null)
+        {
+            s = mf.sharedMesh.bounds.size;
+        }
+        else
+        {
+            var rend = src.GetComponent<Renderer>();
+            if (rend == null) return;
+            s = rend.bounds.size;
+        }
+
+        Vector3 hs = s * 0.5f;
+        Matrix4x4 m = Matrix4x4.TRS(center, rot, Vector3.one);
+        Vector3[] v = new Vector3[8];
+        v[0] = m.MultiplyPoint(new Vector3(-hs.x, -hs.y, -hs.z));
+        v[1] = m.MultiplyPoint(new Vector3( hs.x, -hs.y, -hs.z));
+        v[2] = m.MultiplyPoint(new Vector3( hs.x, -hs.y,  hs.z));
+        v[3] = m.MultiplyPoint(new Vector3(-hs.x, -hs.y,  hs.z));
+        v[4] = m.MultiplyPoint(new Vector3(-hs.x,  hs.y, -hs.z));
+        v[5] = m.MultiplyPoint(new Vector3( hs.x,  hs.y, -hs.z));
+        v[6] = m.MultiplyPoint(new Vector3( hs.x,  hs.y,  hs.z));
+        v[7] = m.MultiplyPoint(new Vector3(-hs.x,  hs.y,  hs.z));
+
+        Handles.color = Color.green;
+        int[][] edges = new int[][]
+        {
+            new[]{0,1}, new[]{1,2}, new[]{2,3}, new[]{3,0},
+            new[]{4,5}, new[]{5,6}, new[]{6,7}, new[]{7,4},
+            new[]{0,4}, new[]{1,5}, new[]{2,6}, new[]{3,7}
+        };
+        foreach (var e in edges) Handles.DrawLine(v[e[0]], v[e[1]]);
+    }
+}
+#endif
