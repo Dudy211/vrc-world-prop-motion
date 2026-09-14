@@ -10,7 +10,7 @@ public class DragEditor : Editor
     private enum EPath  { Linear = 0, Curve = 1 }
     private enum ESpeed { Fixed = 0, Curve = 1 }
     private enum EMotion { Move = 0, Rotate = 1 }
-    private enum ERotPath { Spherical = 0, Axis = 1 }
+    private enum ERotMode { Spherical = 0, Axis = 1 }
     private enum EBase { Pivot = 0, Center = 1 }
     private enum ERole { Receiver = 0, Sender = 1 }
     private enum ETrig { Free = 0, SyncTarget = 1, Rail = 2 }
@@ -18,7 +18,9 @@ public class DragEditor : Editor
     private Drag _drag;
     private readonly Dictionary<string, SerializedProperty> _props = new Dictionary<string, SerializedProperty>();
 
-    private string[][] _destModeNames, _interactModeNames, _loopModeNames, _movePathNames, _speedModeNames, _motionModeNames, _rotatePathNames, _baseNames, _triggerMoveNames, _roleNames;
+    private enum EAxisSource { Manual = 0, ObjectAlign = 1, Euler = 2 }
+
+    private string[][] _destModeNames, _interactModeNames, _loopModeNames, _movePathNames, _speedModeNames, _motionModeNames, _rotateModeNames, _baseNames, _triggerMoveNames, _roleNames, _axisSourceNames, _axisUpNames;
 
     private void InitTexts()
     {
@@ -58,10 +60,10 @@ public class DragEditor : Editor
             new[] { "移動", "回転" },
             new[] { "移动", "旋转" }
         };
-        _rotatePathNames = new[]
+        _rotateModeNames = new[]
         {
             new[] { "Spherical", "Axis" },
-            new[] { "球面", "軸" },
+            new[] { "球面", "軸回転" },
             new[] { "球状旋转", "轴旋转" }
         };
         _baseNames = new[]
@@ -81,6 +83,18 @@ public class DragEditor : Editor
             new[] { "Receiver (moves object)", "Sender (on trigger object)" },
             new[] { "受信側 (動かす本体)", "送信側 (トリガー物体)" },
             new[] { "接收端 (驱动本体)", "发送端 (触发物体上)" }
+        };
+        _axisSourceNames = new[]
+        {
+            new[] { "Manual (Start / End)", "Object Align", "3D Angle (Euler)" },
+            new[] { "手動 (始点/終点)", "オブジェクト一致", "オイラー角" },
+            new[] { "手动 (首尾坐标)", "物体对齐", "三维角度" }
+        };
+        _axisUpNames = new[]
+        {
+            new[] { "X", "Y", "Z" },
+            new[] { "X", "Y", "Z" },
+            new[] { "X", "Y", "Z" }
         };
     }
 
@@ -115,10 +129,19 @@ public class DragEditor : Editor
             case "Param":        return new[] { "Parameter", "パラメータ", "参数设置" }[l];
             case "PathBase":     return new[] { "Path Base", "基準点", "路径基准" }[l];
             case "MotionMode":   return new[] { "Motion Mode", "動作モード", "运动方式" }[l];
-            case "RotatePath":   return new[] { "Rotate Path", "回転パス", "旋转路径" }[l];
+            case "RotateMode":   return new[] { "Rotate Mode", "回転方式", "旋转方式" }[l];
+            case "RotateParams": return new[] { "Rotation Params", "回転パラメータ", "旋转参数" }[l];
+            case "MoveParams":   return new[] { "Move Params", "移動パラメータ", "移动参数" }[l];
             case "AxisStart":    return new[] { "Axis Start", "軸の始点", "轴起点" }[l];
             case "AxisEnd":      return new[] { "Axis End", "軸の終点", "轴终点" }[l];
             case "AxisAngle":    return new[] { "Axis Angle (deg)", "軸角度 (度)", "轴角度 (度)" }[l];
+            case "AxisSource":   return new[] { "Axis Source", "軸の定義", "轴定义方式" }[l];
+            case "AxisLength":   return new[] { "Axis Length (m)", "軸の長さ (m)", "轴长度 (米)" }[l];
+            case "AxisObject":   return new[] { "Align Object", "基準オブジェクト", "对齐物体" }[l];
+            case "AxisUp":       return new[] { "Up Axis (local)", "上方向 (ローカル)", "为上轴向 (本地)" }[l];
+            case "AxisPosOffset":return new[] { "Position Offset (Scene draggable)", "位置オフセット", "位置偏移 (场景可拖)" }[l];
+            case "AxisEuler":    return new[] { "3D Angle / Euler (deg)", "三次元角度 (度)", "三维角度 (欧拉角)" }[l];
+            case "AlignWorldAxis":return new[] { "Align to World Axis", "世界軸に合わせる", "对齐到世界轴" }[l];
             case "MovePath":     return new[] { "Move Path", "移動パス", "移动路径" }[l];
             case "SpeedMode":    return new[] { "Speed Mode", "速度モード", "速度模式" }[l];
             case "MoveSpeed":    return new[] { "Move Speed", "移動速度", "移动速度" }[l];
@@ -176,6 +199,7 @@ public class DragEditor : Editor
         CacheProperty("triggerMoveMode", "triggerMove");
         CacheProperty("offsetVector");
         CacheProperty("rotationVector");
+        CacheProperty("rotateVector");
         CacheProperty("destinationTransform");
         CacheProperty("relativePositionOffset");
         CacheProperty("relativeRotationOffset");
@@ -184,10 +208,16 @@ public class DragEditor : Editor
         CacheProperty("onReachDestination", "arriveEvent");
         CacheProperty("pathBase", "baseMode");
         CacheProperty("motionMode");
-        CacheProperty("rotatePathMode", "rotationPathMode");
+        CacheProperty("rotateMode", "rotatePathMode", "rotationPathMode");
         CacheProperty("axisStart", "axisStartPoint");
         CacheProperty("axisEnd", "axisEndPoint");
         CacheProperty("axisAngle", "rotationAngle");
+        CacheProperty("axisSource");
+        CacheProperty("axisLength");
+        CacheProperty("axisObject");
+        CacheProperty("axisUp");
+        CacheProperty("axisPositionOffset");
+        CacheProperty("axisEuler");
         CacheProperty("movePathMode", "movePath");
         CacheProperty("speedMode");
         CacheProperty("moveSpeed", "speed");
@@ -201,6 +231,18 @@ public class DragEditor : Editor
         CacheProperty("previewPath");
         CacheProperty("editEndPosition");
         CacheProperty("previewMesh");
+
+        // 兼容旧工程: 手动模式下 axisLength 与 |axisEnd - axisStart| 同步一次
+        var asP = Get("axisStart");
+        var aeP = Get("axisEnd");
+        var alP = Get("axisLength");
+        var srcP0 = Get("axisSource");
+        if (asP != null && aeP != null && alP != null && (srcP0 == null || srcP0.enumValueIndex == (int)EAxisSource.Manual))
+        {
+            float mag = (aeP.vector3Value - asP.vector3Value).magnitude;
+            if (mag > 0.001f && Mathf.Abs(alP.floatValue - mag) > 0.0005f)
+                alP.floatValue = mag;
+        }
 
         var required = new[] { "trigger", "movePathMode", "previewDestination" };
         var missing = new List<string>();
@@ -296,43 +338,115 @@ public class DragEditor : Editor
         EditorGUILayout.LabelField(T("Core"), EditorStyles.boldLabel);
         Draw("target", T("Target"));
 
-        var destMode = Get("destinationMode");
-        if (destMode != null)
-            destMode.enumValueIndex = EditorGUILayout.Popup(T("DestMode"), destMode.enumValueIndex, _destModeNames[Lang]);
-
         var interactMode = Get("interactionMode");
         if (interactMode != null)
             interactMode.enumValueIndex = EditorGUILayout.Popup(T("InteractMode"), interactMode.enumValueIndex, _interactModeNames[Lang]);
 
         DrawAlias(new[] { "trigger", "triggerObject", "triggerTransform" }, T("TriggerObj"));
 
+        EditorGUILayout.Space();
+
+        var motionMode = Get("motionMode");
+        if (motionMode != null)
+            motionMode.enumValueIndex = EditorGUILayout.Popup(T("MotionMode"), motionMode.enumValueIndex, _motionModeNames[Lang]);
+        bool isRotate = motionMode != null && motionMode.enumValueIndex == (int)EMotion.Rotate;
+
+        var destMode = Get("destinationMode");
         int dMode = destMode != null ? destMode.enumValueIndex : 0;
-        if (dMode == 0)
+
+        if (isRotate)
         {
-            Draw("offsetVector", T("OffsetVec"));
-            Draw("rotationVector", T("RotVec"));
-        }
-        else if (dMode == 1)
-        {
-            Draw("destinationTransform", T("DestTrans"));
-            var destTrans = Get("destinationTransform");
-            bool noDest = destTrans != null && destTrans.objectReferenceValue == null;
-            using (new EditorGUI.DisabledScope(noDest))
+            EditorGUILayout.LabelField(T("RotateParams"), EditorStyles.boldLabel);
+
+            var rotateMode = Get("rotateMode") ?? Get("rotatePathMode") ?? Get("rotationPathMode");
+            if (rotateMode != null)
+                rotateMode.enumValueIndex = EditorGUILayout.Popup(T("RotateMode"), rotateMode.enumValueIndex, _rotateModeNames[Lang]);
+            bool isAxis = rotateMode != null && rotateMode.enumValueIndex == (int)ERotMode.Axis;
+
+            if (isAxis)
             {
-                Draw("relativePositionOffset", T("OffsetVec"));
-                Draw("relativeRotationOffset", T("RotVec"));
+                var axisSource = Get("axisSource");
+                if (axisSource != null)
+                    axisSource.enumValueIndex = EditorGUILayout.Popup(T("AxisSource"), axisSource.enumValueIndex, _axisSourceNames[Lang]);
+                int srcMode = axisSource != null ? axisSource.enumValueIndex : 0;
+
+                if (srcMode == (int)EAxisSource.ObjectAlign)
+                {
+                    Draw("axisObject", T("AxisObject"));
+                    var upProp = Get("axisUp");
+                    if (upProp != null)
+                        upProp.enumValueIndex = EditorGUILayout.Popup(T("AxisUp"), upProp.enumValueIndex, _axisUpNames[Lang]);
+                    Draw("axisPositionOffset", T("AxisPosOffset"));
+                    Draw("axisLength", T("AxisLength"));
+                }
+                else if (srcMode == (int)EAxisSource.Euler)
+                {
+                    Draw("axisEuler", T("AxisEuler"));
+                    Draw("axisPositionOffset", T("AxisPosOffset"));
+                    Draw("axisLength", T("AxisLength"));
+                    DrawWorldAxisButtons();
+                }
+                else
+                {
+                    Draw("axisStart", T("AxisStart"));
+                    Draw("axisEnd", T("AxisEnd"));
+                    Draw("axisLength", T("AxisLength"));
+                    DrawWorldAxisButtons();
+                }
+
+                Draw("axisAngle", T("AxisAngle"));
+            }
+            else
+            {
+                Draw("rotateVector", T("RotVec"));
             }
         }
-        else if (dMode == 2)
+        else
         {
-            Draw("pathPoints", T("PathPoints"));
+            EditorGUILayout.LabelField(T("MoveParams"), EditorStyles.boldLabel);
+
+            if (destMode != null)
+                destMode.enumValueIndex = EditorGUILayout.Popup(T("DestMode"), destMode.enumValueIndex, _destModeNames[Lang]);
+            dMode = destMode != null ? destMode.enumValueIndex : 0;
+
+            if (dMode == 0)
+            {
+                Draw("offsetVector", T("OffsetVec"));
+                Draw("rotationVector", T("RotVec"));
+            }
+            else if (dMode == 1)
+            {
+                Draw("destinationTransform", T("DestTrans"));
+                var destTrans = Get("destinationTransform");
+                bool noDest = destTrans != null && destTrans.objectReferenceValue == null;
+                using (new EditorGUI.DisabledScope(noDest))
+                {
+                    Draw("relativePositionOffset", T("OffsetVec"));
+                    Draw("relativeRotationOffset", T("RotVec"));
+                }
+            }
+            else if (dMode == 2)
+            {
+                Draw("pathPoints", T("PathPoints"));
+            }
+
+            var movePath = Get("movePathMode") ?? Get("movePath");
+            if (movePath != null)
+                movePath.enumValueIndex = EditorGUILayout.Popup(T("MovePath"), movePath.enumValueIndex, _movePathNames[Lang]);
+            bool isCurve = movePath != null && movePath.enumValueIndex == (int)EPath.Curve;
+
+            if (isCurve)
+            {
+                Draw("moveCurve", T("MoveCurve"));
+                EditorGUILayout.HelpBox(T("CurveHelp"), MessageType.Info);
+                DrawAlias(new[] { "autoCurveOrigin", "autoOrigin" }, T("AutoOrigin"));
+                var auto = Get("autoCurveOrigin") ?? Get("autoOrigin");
+                using (new EditorGUI.DisabledScope(auto != null && auto.boolValue))
+                    Draw("curveOrigin", T("CurveOrigin"));
+            }
+
+            Draw("gravityScale", T("Gravity"));
         }
-
-        var loopMode = Get("loopMode");
-        if (loopMode != null)
-            loopMode.enumValueIndex = EditorGUILayout.Popup(T("LoopMode"), loopMode.enumValueIndex, _loopModeNames[Lang]);
-
-        Draw("onReachDestination", T("OnReach"));
 
         EditorGUILayout.Space();
 
@@ -341,38 +455,6 @@ public class DragEditor : Editor
         var pathBase = Get("pathBase") ?? Get("baseMode");
         if (pathBase != null)
             pathBase.enumValueIndex = EditorGUILayout.Popup(T("PathBase"), pathBase.enumValueIndex, _baseNames[Lang]);
-        bool byCenter = pathBase != null && pathBase.enumValueIndex == (int)EBase.Center;
-
-        var motionMode = Get("motionMode");
-        if (motionMode != null)
-            motionMode.enumValueIndex = EditorGUILayout.Popup(T("MotionMode"), motionMode.enumValueIndex, _motionModeNames[Lang]);
-        bool isRotate = motionMode != null && motionMode.enumValueIndex == (int)EMotion.Rotate;
-
-        var rotatePath = Get("rotatePathMode") ?? Get("rotationPathMode");
-        if (isRotate)
-        {
-            if (rotatePath != null)
-                rotatePath.enumValueIndex = EditorGUILayout.Popup(T("RotatePath"), rotatePath.enumValueIndex, _rotatePathNames[Lang]);
-            bool isAxis = rotatePath != null && rotatePath.enumValueIndex == (int)ERotPath.Axis;
-            if (isAxis)
-            {
-                Draw("axisStart", T("AxisStart"));
-                Draw("axisEnd", T("AxisEnd"));
-                Draw("axisAngle", T("AxisAngle"));
-            }
-            else
-            {
-                Draw("rotationVector", T("RotVec"));
-            }
-        }
-
-        var movePath = Get("movePathMode") ?? Get("movePath");
-        if (!isRotate)
-        {
-            if (movePath != null)
-                movePath.enumValueIndex = EditorGUILayout.Popup(T("MovePath"), movePath.enumValueIndex, _movePathNames[Lang]);
-        }
-        bool isCurve = !isRotate && movePath != null && movePath.enumValueIndex == (int)EPath.Curve;
 
         var speedMode = Get("speedMode");
         if (speedMode != null)
@@ -388,27 +470,19 @@ public class DragEditor : Editor
             Draw("speedCurve", T("SpeedCurve"));
         }
 
-        if (isCurve)
-        {
-            Draw("moveCurve", T("MoveCurve"));
-            EditorGUILayout.HelpBox(T("CurveHelp"), MessageType.Info);
-            DrawAlias(new[] { "autoCurveOrigin", "autoOrigin" }, T("AutoOrigin"));
-            var auto = Get("autoCurveOrigin") ?? Get("autoOrigin");
-            using (new EditorGUI.DisabledScope(auto != null && auto.boolValue))
-                Draw("curveOrigin", T("CurveOrigin"));
-        }
-
         Draw("drag", T("Drag"));
-        if (!isRotate)
-        {
-            Draw("gravityScale", T("Gravity"));
-        }
+
+        var loopMode = Get("loopMode");
+        if (loopMode != null)
+            loopMode.enumValueIndex = EditorGUILayout.Popup(T("LoopMode"), loopMode.enumValueIndex, _loopModeNames[Lang]);
+
+        Draw("onReachDestination", T("OnReach"));
 
         EditorGUILayout.Space();
 
         EditorGUILayout.LabelField(T("Preview"), EditorStyles.boldLabel);
         Draw("previewDestination", T("PreviewDest"));
-        if (dMode == 0 && !isRotate)
+        if (!isRotate && dMode == 0)
         {
             var previewDestToggle = Get("previewDestination");
             using (new EditorGUI.DisabledScope(previewDestToggle == null || !previewDestToggle.boolValue))
@@ -418,6 +492,79 @@ public class DragEditor : Editor
         Draw("previewMesh", T("PreviewMesh"));
 
         serializedObject.ApplyModifiedProperties();
+    }
+
+    private void ApplyAxisSceneChange()
+    {
+        serializedObject.ApplyModifiedProperties();
+        EditorUtility.SetDirty(_drag);
+    }
+
+    // 与 Drag.ComputeAxisLine 保持一致
+    private void EditorComputeAxis(out Vector3 anchor, out Vector3 dir, out float len)
+    {
+        var srcP = Get("axisSource");
+        int src = srcP != null ? srcP.enumValueIndex : 0;
+        var lenP = Get("axisLength");
+        len = lenP != null ? lenP.floatValue : 1f;
+        if (len < 0.001f) len = 0.001f;
+
+        Vector3 s = Get("axisStart") != null ? Get("axisStart").vector3Value : Vector3.zero;
+        Vector3 en = Get("axisEnd") != null ? Get("axisEnd").vector3Value : Vector3.up;
+
+        if (src == (int)EAxisSource.ObjectAlign && _drag.axisObject != null)
+        {
+            var upP = Get("axisUp");
+            int up = upP != null ? upP.enumValueIndex : 1;
+            Vector3 local = up == 0 ? Vector3.right : (up == 2 ? Vector3.forward : Vector3.up);
+            dir = (_drag.axisObject.rotation * local).normalized;
+            anchor = RefPoint(_drag.axisObject) + (Get("axisPositionOffset")?.vector3Value ?? Vector3.zero);
+        }
+        else if (src == (int)EAxisSource.Euler)
+        {
+            dir = (Quaternion.Euler(Get("axisEuler")?.vector3Value ?? Vector3.zero) * Vector3.up).normalized;
+            anchor = RefPoint(_drag.target) + (Get("axisPositionOffset")?.vector3Value ?? Vector3.zero);
+        }
+        else
+        {
+            Vector3 d = en - s;
+            dir = (d.sqrMagnitude > 1e-8f) ? d.normalized : Vector3.up;
+            anchor = s;
+        }
+    }
+
+    private void DrawWorldAxisButtons()
+    {
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel(T("AlignWorldAxis"));
+        if (GUILayout.Button("X")) AlignAxisToWorld(Vector3.right);
+        if (GUILayout.Button("Y")) AlignAxisToWorld(Vector3.up);
+        if (GUILayout.Button("Z")) AlignAxisToWorld(Vector3.forward);
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private void AlignAxisToWorld(Vector3 dir)
+    {
+        var srcP = Get("axisSource");
+        int src = srcP != null ? srcP.enumValueIndex : 0;
+
+        if (src == (int)EAxisSource.Euler)
+        {
+            // 默认框架 up=+Y: 用最短弧得到等价欧拉角
+            var ep = Get("axisEuler");
+            if (ep != null) ep.vector3Value = Quaternion.FromToRotation(Vector3.up, dir).eulerAngles;
+        }
+        else
+        {
+            // Manual: 保留起点, 终点 = 起点 + 世界方向 * 长度
+            var sp = Get("axisStart");
+            var ep2 = Get("axisEnd");
+            var lp = Get("axisLength");
+            Vector3 a = sp != null ? sp.vector3Value : Vector3.zero;
+            float len = lp != null ? lp.floatValue : 1f;
+            if (ep2 != null) ep2.vector3Value = a + dir * len;
+        }
+        ApplyAxisSceneChange();
     }
 
     private void OnSceneGUI()
@@ -464,8 +611,8 @@ public class DragEditor : Editor
         bool byCenter = pathBaseProp != null && pathBaseProp.enumValueIndex == (int)EBase.Center;
         var motionModeProp = Get("motionMode");
         bool isRotate = motionModeProp != null && motionModeProp.enumValueIndex == (int)EMotion.Rotate;
-        var rotatePathProp = Get("rotatePathMode") ?? Get("rotationPathMode");
-        bool isAxis = isRotate && rotatePathProp != null && rotatePathProp.enumValueIndex == (int)ERotPath.Axis;
+        var rotatePathProp = Get("rotateMode") ?? Get("rotatePathMode") ?? Get("rotationPathMode");
+        bool isAxis = isRotate && rotatePathProp != null && rotatePathProp.enumValueIndex == (int)ERotMode.Axis;
         var movePath = Get("movePathMode") ?? Get("movePath");
         bool isCurve = !isRotate && movePath != null && movePath.enumValueIndex == (int)EPath.Curve;
 
@@ -502,34 +649,62 @@ public class DragEditor : Editor
 
         if (isAxis)
         {
-            var asProp = Get("axisStart");
-            var aeProp = Get("axisEnd");
-            Vector3 a = asProp != null ? asProp.vector3Value : Vector3.zero;
-            Vector3 b = aeProp != null ? aeProp.vector3Value : Vector3.up;
+            var srcProp = Get("axisSource");
+            int srcMode = srcProp != null ? srcProp.enumValueIndex : 0;
+
+            EditorComputeAxis(out Vector3 anchor, out Vector3 axisDir, out float axisLen);
+            Vector3 a = anchor;
+            Vector3 b = anchor + axisDir * axisLen;
 
             Handles.color = Color.cyan;
             Handles.DrawLine(a, b);
+            Handles.SphereHandleCap(0, a, Quaternion.identity, HandleUtility.GetHandleSize(a) * 0.06f, EventType.Repaint);
+            Handles.SphereHandleCap(0, b, Quaternion.identity, HandleUtility.GetHandleSize(b) * 0.06f, EventType.Repaint);
 
-            Handles.color = Color.red;
-            EditorGUI.BeginChangeCheck();
-            Vector3 newA = Handles.PositionHandle(a, Quaternion.identity);
-            if (EditorGUI.EndChangeCheck() && asProp != null)
+            var alProp = Get("axisLength");
+
+            if (srcMode == (int)EAxisSource.Manual)
             {
-                Undo.RecordObject(_drag, "Move Axis Start");
-                asProp.vector3Value = newA;
-                serializedObject.ApplyModifiedProperties();
-                EditorUtility.SetDirty(_drag);
+                var asProp = Get("axisStart");
+                var aeProp = Get("axisEnd");
+                Vector3 sa = asProp != null ? asProp.vector3Value : Vector3.zero;
+                Vector3 sb = aeProp != null ? aeProp.vector3Value : Vector3.up;
+
+                Handles.color = Color.red;
+                EditorGUI.BeginChangeCheck();
+                Vector3 newA = Handles.PositionHandle(sa, Quaternion.identity);
+                if (EditorGUI.EndChangeCheck() && asProp != null)
+                {
+                    Undo.RecordObject(_drag, "Move Axis Start");
+                    asProp.vector3Value = newA;
+                    if (alProp != null) alProp.floatValue = (sb - newA).magnitude;
+                    ApplyAxisSceneChange();
+                }
+
+                Handles.color = Color.green;
+                EditorGUI.BeginChangeCheck();
+                Vector3 newB = Handles.PositionHandle(sb, Quaternion.identity);
+                if (EditorGUI.EndChangeCheck() && aeProp != null)
+                {
+                    Undo.RecordObject(_drag, "Move Axis End");
+                    aeProp.vector3Value = newB;
+                    if (alProp != null) alProp.floatValue = (newB - sa).magnitude;
+                    ApplyAxisSceneChange();
+                }
             }
-
-            Handles.color = Color.green;
-            EditorGUI.BeginChangeCheck();
-            Vector3 newB = Handles.PositionHandle(b, Quaternion.identity);
-            if (EditorGUI.EndChangeCheck() && aeProp != null)
+            else
             {
-                Undo.RecordObject(_drag, "Move Axis End");
-                aeProp.vector3Value = newB;
-                serializedObject.ApplyModifiedProperties();
-                EditorUtility.SetDirty(_drag);
+                // ObjectAlign / Euler: 黄色中心手柄, 整体拖动轴位置
+                var offProp = Get("axisPositionOffset");
+                Handles.color = Color.yellow;
+                EditorGUI.BeginChangeCheck();
+                Vector3 newCenter = Handles.PositionHandle(a, Quaternion.identity);
+                if (EditorGUI.EndChangeCheck() && offProp != null)
+                {
+                    Undo.RecordObject(_drag, "Move Axis Center");
+                    offProp.vector3Value = offProp.vector3Value + (newCenter - a);
+                    ApplyAxisSceneChange();
+                }
             }
         }
 
@@ -636,6 +811,14 @@ public class DragEditor : Editor
         var motionModeProp = Get("motionMode");
         if (motionModeProp != null && motionModeProp.enumValueIndex == (int)EMotion.Rotate)
         {
+            var rp = Get("rotateMode") ?? Get("rotatePathMode") ?? Get("rotationPathMode");
+            if (rp != null && rp.enumValueIndex == (int)ERotMode.Axis)
+            {
+                EditorComputeAxis(out Vector3 anchor, out Vector3 dir, out _);
+                float ang = Get("axisAngle") != null ? Get("axisAngle").floatValue : 360f;
+                Vector3 c0 = RefPoint(_drag.target);
+                return anchor + Quaternion.AngleAxis(ang, dir) * (c0 - anchor);
+            }
             return RefPoint(_drag.target);
         }
         var destMode = Get("destinationMode");
@@ -654,17 +837,16 @@ public class DragEditor : Editor
         var motionModeProp = Get("motionMode");
         if (motionModeProp != null && motionModeProp.enumValueIndex == (int)EMotion.Rotate)
         {
-            var rp = Get("rotatePathMode") ?? Get("rotationPathMode");
-            if (rp != null && rp.enumValueIndex == (int)ERotPath.Axis)
+            var rp = Get("rotateMode") ?? Get("rotatePathMode") ?? Get("rotationPathMode");
+            if (rp != null && rp.enumValueIndex == (int)ERotMode.Axis)
             {
-                Vector3 a = Get("axisStart") != null ? Get("axisStart").vector3Value : Vector3.zero;
-                Vector3 b = Get("axisEnd") != null ? Get("axisEnd").vector3Value : Vector3.up;
-                Vector3 axis = b - a;
-                if (axis.sqrMagnitude < 1e-8f) return _drag.target.rotation;
+                EditorComputeAxis(out _, out Vector3 axisDir, out _);
+                if (axisDir.sqrMagnitude < 1e-8f) return _drag.target.rotation;
                 float ang = Get("axisAngle") != null ? Get("axisAngle").floatValue : 360f;
-                return _drag.target.rotation * Quaternion.AngleAxis(ang, axis.normalized);
+                return _drag.target.rotation * Quaternion.AngleAxis(ang, axisDir);
             }
-            Vector3 rv = Get("rotationVector") != null ? Get("rotationVector").vector3Value : Vector3.zero;
+            var rvp = Get("rotateVector") ?? Get("rotationVector");
+            Vector3 rv = rvp != null ? rvp.vector3Value : Vector3.zero;
             return _drag.target.rotation * Quaternion.Euler(rv);
         }
         var destMode = Get("destinationMode");
