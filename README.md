@@ -1,111 +1,82 @@
 # VRC World Prop Motion
 
-[![Latest Release](https://img.shields.io/github/v/release/Dudy211/vrc-world-prop-motion?label=latest%20release&color=blue)](https://github.com/Dudy211/vrc-world-prop-motion/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![Languages](https://img.shields.io/badge/languages-EN%20%7C%20%E4%B8%AD%E6%96%87%20%7C%20%E6%97%A5%E6%9C%AC%E8%AA%9E-blue)](./README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![VRChat](https://img.shields.io/badge/VRChat-UdonSharp-orange.svg)](https://vrchat.com)
 
-A lightweight **UdonSharp** plugin for **VRChat Worlds** that lets you animate
-**Props (world objects)** with precise motion control.
+**VRC World Prop Motion** is a robust **UdonSharp** plugin designed for **VRChat World** creators. 
+It allows you to animate props (objects) with precise control over movement, rotation, physics, and networking—no coding required.
 
-Define **movement and rotation sequences** using curves, physics integration,
-and drag interaction — and keep everything **synced across the network**.
+Perfect for elevators, sliding doors, intricate knobs, and physical tracks.
 
-> Also available in: [中文](./README_CN.md) · [日本語](./README_JP.md)
+## ✨ Key Features
 
----
+### 🔄 Sender / Receiver Architecture
+*   **Receiver**: Attached to the object being moved. Executes transformations.
+*   **Sender**: Attached to buttons or handles. Triggers the Receiver.
+*   Supports **Interact** (click) and **Drag** (manual control) triggers.
 
-## ✨ Features
+### 📐 Advanced Motion Modes
+*   **Move**: Linear movement between points.
+*   **Rotate**:
+    *   **Spherical**: Smoothly interpolate between two rotations.
+    *   **Axis**: Rotate around a custom axis (Manual, Object Align, or Euler). Supports multi-turn rotations (e.g., 3600° knobs).
 
-- **Transform Control** — Move and rotate objects along configurable paths.
-- **Curves & Physics** — Drive motion with `AnimationCurve` and gravity.
-- **Interaction** — Trigger animations via `Interact` or **Drag** components.
-- **Network Sync** — Smooth synchronization across all clients.
-- **Localization** — Inspector UI supports **English · 中文 · 日本語**.
+### 🎢 Paths & Curves
+*   **Path Points**: Move through a sequence of Transforms.
+*   **Animation Curves**: Define height arcs and speed tweening (Easing).
+*   **Auto-Origin**: Automatically calculates path mid-points for curves.
 
----
+### 🛠️ Physics & Interaction
+*   **Rail Mode**: Constrain dragging to a specific track.
+*   **Sync Target**: Hand syncs to the object for precise control.
+*   **Gravity & Drag**: Simulate realistic sliding physics.
+*   **Loop & PingPong**: Flexible path looping.
+
+### 🌐 Networking
+*   Stable synchronization using `UdonBehaviourSyncMode.Continuous`.
+*   Automatic ownership transfer handling.
+
+### 🎨 Editor Enhancements
+*   **Trilingual UI**: Inspector supports **English, 日本語, and 中文**.
+*   **Scene View Gizmos**:
+    *   Visualize paths, destinations, and rotation axes.
+    *   Drag handles for adjusting vectors directly in the Scene view.
+*   **Auto-Initialization**: Automatically generates `Drag.asset` to prevent UdonSharp reference errors.
 
 ## 📦 Installation
 
-### Option A: Unitypackage (Recommended)
-
-1. Download the latest `vrc-world-prop-motion-x.y.z.unitypackage` from the
-   [**Releases page**](https://github.com/Dudy211/vrc-world-prop-motion/releases).
-2. **Double-click** the file, or go to `Assets > Import Package > Custom Package…`
-   in Unity, then import it into your project.
-   > ⚠️ **Important:** make sure every `.cs` file is paired with its `.meta`
-   > file in the import list — otherwise script references will break.
-3. Ensure **UdonSharp** is installed via **VCC**
-   (it ships with the **VRChat Worlds SDK**).
-4. The plugin lives in `Assets/VRCPropMotion/`.
-
-### Option B: Clone / Download (For Developers)
-
-1. Make sure **UdonSharp** is installed in your project.
-2. Clone this repo or download the ZIP, then copy the `VRCPropMotion/` folder
-   into your `Assets/` directory.
-
----
+1.  Ensure **UdonSharp** is installed via **VCC** (included with the Worlds SDK).
+2.  Download the latest `vrc-world-prop-motion.unitypackage` from the [Releases](https://github.com/Dudy211/vrc-world-prop-motion/releases) page.
+3.  Import it into your Unity project.
+4.  If `Drag.asset` fails to generate, use the menu: **`Tools > VRC Prop Motion > Setup Drag Program Asset`**.
 
 ## 🚀 Quick Start
 
-1. Import the package (Option A above).
-2. In your scene, select the **Prop** object you want to animate.
-3. `Add Component > Drag` (the UdonSharp behaviour).
-4. Configure **curves, physics, and interaction** in the Inspector.
-5. Enter **Play Mode** to test the motion and network sync.
+### Moving a Prop (Receiver)
+1.  Attach `Drag.cs` to your prop.
+2.  Set **Role** to `Receiver`.
+3.  Set **Motion Mode** to `Move`.
+4.  Configure **Destination Mode** (e.g., Offset Vector) and adjust the **Offset**.
+5.  Enter Play mode or trigger via Interact/Drag.
 
----
+### Creating a Draggable Door (Sender + Receiver)
+1.  **Receiver**: Attach to the door. Set the destination position.
+2.  **Sender**: Attach to the door handle.
+    *   **Role**: `Sender`
+    *   **Receiver**: Assign the door object.
+    *   **Interaction Mode**: `Drag`
+    *   **Trigger Move Mode**: `Rail`.
+3.  Grab the handle in-game to slide the door.
 
-## 🔧 Requirements
+## ⚠️ Troubleshooting
 
-| Dependency | Version |
-|---|---|
-| Unity | `2019.4.31f1` (VRChat World Starter Template) |
-| VRChat Worlds SDK | latest (via VCC) |
-| UdonSharp | latest (ships with Worlds SDK) |
+### 1. `Program Source is None` Error
+*   Ensure `Assets/VRCPropMotion/Drag.asset` exists.
+*   If missing, use the menu `Tools > VRC Prop Motion > Setup Drag Program Asset`.
 
----
+### 2. `Drag.cs is referenced by 2 UdonSharpProgramAssets`
+*   **Cause**: A naming conflict with another plugin (e.g., Ohmiwa examples).
+*   **Fix**: Delete `Assets/VRCPropMotion/Drag.asset` to let UdonSharp use the existing reference, or rename `Drag.cs` to `VRCPropMotionDrag.cs`.
 
-## 🐛 Troubleshooting
-
-### `Program Source is None` / asset not auto-generated
-The plugin's **Editor scripts** automatically create the required
-`UdonSharpProgramAsset` (`.asset`) on import and bind it to `Drag.cs`.
-- Check the **Console** for the `[VRCPropMotion] 已生成 / Generated Drag.asset`
-  log message.
-- If it did **not** run, use the manual fallback menu:
-  `Tools > VRC Prop Motion > Setup Drag Program Asset`.
-
-### `Script Drag.cs is referenced by 2 UdonSharpProgramAssets`
-This means **another asset in your project** (e.g. a downloaded prefab like
-Ohmiwa's `SlantedCeilingRoom`) **also references a `Drag.cs`**.
-UdonSharp requires **one script = one program asset**.
-
-**Fix (pick one):**
-1. **Delete** `Assets/VRCPropMotion/Drag.asset`, let the other asset handle it.
-2. **Rename** the script/class to a unique name (e.g. `VRCPropMotionDrag`)
-   to avoid collisions — **recommended for distribution**.
-3. Re-open Unity and let the Editor scripts re-link everything.
-
-### Import errors / wrong meta files
-- Never include **UdonSharp / VRCSDK** folders in your own `.unitypackage`
-  (users install them via VCC).
-- Always **keep `.meta` files** so GUID references survive the import.
-
-See [CHANGELOG.md](./CHANGELOG.md) for version history.
-
----
-
-## 🤝 Contributing
-
-Issues and Pull Requests are welcome!
-If you find a bug or have a feature idea, please open an Issue.
-
-This is an **early beta**, so help from experienced VRChat / UdonSharp
-developers is greatly appreciated 🙏
-
----
-
-## 📝 License
-
-[MIT](./LICENSE) © 2026 [Dudy211](https://github.com/Dudy211)
+## 📜 License
+Licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
