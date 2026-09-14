@@ -1,7 +1,12 @@
 # VRC World Prop Motion (VRC 世界物体运动插件)
 
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![中文](https://img.shields.io/badge/Language-中文-red.svg)](README_CN.md)
+[![日本語](https://img.shields.io/badge/Language-日本語-green.svg)](README_JP.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![VRChat](https://img.shields.io/badge/VRChat-UdonSharp-orange.svg)](https://vrchat.com)
+[![Latest Release](https://img.shields.io/github/v/release/Dudy211/vrc-world-prop-motion?include_prereleases)](https://github.com/Dudy211/vrc-world-prop-motion/releases)
 
 **VRC World Prop Motion** 是一款功能强大的 **UdonSharp** 插件，专为 **VRChat 世界**创作者打造。
 无需编写代码，只需在 Inspector 面板中配置，即可实现复杂的物体移动、旋转、物理交互与网络同步。

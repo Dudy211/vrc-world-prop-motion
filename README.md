@@ -1,9 +1,14 @@
 # VRC World Prop Motion
 
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![中文](https://img.shields.io/badge/Language-中文-red.svg)](README_CN.md)
+[![日本語](https://img.shields.io/badge/Language-日本語-green.svg)](README_JP.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![VRChat](https://img.shields.io/badge/VRChat-UdonSharp-orange.svg)](https://vrchat.com)
+[![Latest Release](https://img.shields.io/github/v/release/Dudy211/vrc-world-prop-motion?include_prereleases)](https://github.com/Dudy211/vrc-world-prop-motion/releases)
 
-**VRC World Prop Motion** is a robust **UdonSharp** plugin designed for **VRChat World** creators. 
+**VRC World Prop Motion** is a robust **UdonSharp** plugin designed for **VRChat World** creators.
 It allows you to animate props (objects) with precise control over movement, rotation, physics, and networking—no coding required.
 
 Perfect for elevators, sliding doors, intricate knobs, and physical tracks.

@@ -1,7 +1,12 @@
 # VRC World Prop Motion
 
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![中文](https://img.shields.io/badge/Language-中文-red.svg)](README_CN.md)
+[![日本語](https://img.shields.io/badge/Language-日本語-green.svg)](README_JP.md)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![VRChat](https://img.shields.io/badge/VRChat-UdonSharp-orange.svg)](https://vrchat.com)
+[![Latest Release](https://img.shields.io/github/v/release/Dudy211/vrc-world-prop-motion?include_prereleases)](https://github.com/Dudy211/vrc-world-prop-motion/releases)
 
 **VRC World Prop Motion** は、**VRChatワールド**向けの強力な **UdonSharp** プラグインです。
 コードを書くことなく、インスペクター上の設定だけで、プロップ（オブジェクト）の移動・回転・物理演算・ネットワーク同期を高度に制御できます。
