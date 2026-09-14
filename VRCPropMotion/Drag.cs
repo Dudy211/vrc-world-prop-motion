@@ -29,10 +29,24 @@ public enum MotionMode
     Rotate
 }
 
-public enum RotatePathMode
+public enum RotateMode
 {
     Spherical,
     Axis
+}
+
+public enum AxisSourceMode
+{
+    Manual,
+    ObjectAlign,
+    Euler
+}
+
+public enum AxisUp
+{
+    X,
+    Y,
+    Z
 }
 
 public enum MovePathMode
@@ -85,12 +99,6 @@ public class Drag : UdonSharpBehaviour
     public Drag receiver;
 
     public Transform target;
-    public DestinationMode destinationMode;
-    public Transform destinationTransform;
-    public Vector3 relativePositionOffset;
-    public Vector3 relativeRotationOffset;
-    public Vector3 offsetVector;
-    public Vector3 rotationVector;
 
     [Tooltip("How to trigger movement")]
     public InteractionMode interactionMode;
@@ -101,9 +109,60 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("Drag mode: how the trigger handle itself moves (Free = carried by hand; SyncTarget = rigidly follows target; Rail = slides on the rail line)")]
     public TriggerMoveMode triggerMoveMode = TriggerMoveMode.Rail;
 
+    [Header("Motion")]
+    [Tooltip("Move = translate along path; Rotate = only orientation changes")]
+    public MotionMode motionMode = MotionMode.Move;
+
+    [Header("Rotation (Rotate mode only)")]
+    [Tooltip("Spherical = slerp start->end orientation; Axis = spin around the axis line")]
+    public RotateMode rotateMode = RotateMode.Spherical;
+
+    [Tooltip("Spherical rotation: orientation offset from the start orientation to the end (Euler degrees)")]
+    public Vector3 rotateVector;
+
+    [Tooltip("Axis rotation: how the axis line is defined")]
+    public AxisSourceMode axisSource = AxisSourceMode.Manual;
+
+    [Tooltip("Manual mode: start point of the axis line (world space, draggable in Scene)")]
+    public Vector3 axisStart = Vector3.zero;
+
+    [Tooltip("Manual mode: end point of the axis line (world space, draggable in Scene)")]
+    public Vector3 axisEnd = new Vector3(0f, 1f, 0f);
+
+    [Tooltip("Axis line length in meters (all axis source modes)")]
+    public float axisLength = 1f;
+
+    [Tooltip("ObjectAlign mode: the axis aligns to one of its local axes and follows its position")]
+    public Transform axisObject;
+
+    [Tooltip("ObjectAlign mode: which local axis of the object is used as the axis direction (上方向)")]
+    public AxisUp axisUp = AxisUp.Y;
+
+    [Tooltip("World-space offset from the auto-computed axis center (draggable in Scene)")]
+    public Vector3 axisPositionOffset = Vector3.zero;
+
+    [Tooltip("Euler mode: 3D angle in degrees. Default frame: up = +Y, forward = -Z")]
+    public Vector3 axisEuler = Vector3.zero;
+
+    [Tooltip("Axis rotation: total angle in degrees over the full trip (multi-turn allowed, e.g. 3600)")]
+    public float axisAngle = 360f;
+
+    [Header("Movement (Move mode only)")]
+    public DestinationMode destinationMode;
+    public Transform destinationTransform;
+    public Vector3 relativePositionOffset;
+    public Vector3 relativeRotationOffset;
+    public Vector3 offsetVector;
+
+    [Tooltip("Move mode only: extra rotation applied while translating (Euler degrees, multiplied by progress)")]
+    public Vector3 rotationVector;
+
     [Tooltip("Path points (used in PathPoints mode)")]
     public Transform[] pathPoints;
 
+    public MovePathMode movePathMode = MovePathMode.Linear;
+
+    [Header("Common")]
     [Tooltip("Loop = repeat path freely; PingPong = stay on the start<->end track")]
     public LoopMode loopMode;
 
@@ -112,23 +171,6 @@ public class Drag : UdonSharpBehaviour
 
     [Tooltip("Path reference point: Pivot = transform position; Center = renderer bounds center")]
     public PathBase pathBase = PathBase.Pivot;
-
-    [Tooltip("Move = translate along path; Rotate = only orientation changes")]
-    public MotionMode motionMode = MotionMode.Move;
-
-    [Tooltip("Spherical = slerp start->end orientation; Axis = spin around the axis line")]
-    public RotatePathMode rotatePathMode = RotatePathMode.Spherical;
-
-    [Tooltip("Axis rotation: start point of the axis line (world space, draggable in Scene)")]
-    public Vector3 axisStart = Vector3.zero;
-
-    [Tooltip("Axis rotation: end point of the axis line (world space, draggable in Scene)")]
-    public Vector3 axisEnd = new Vector3(0f, 1f, 0f);
-
-    [Tooltip("Axis rotation: total angle in degrees over the full trip (multi-turn allowed, e.g. 3600)")]
-    public float axisAngle = 360f;
-
-    public MovePathMode movePathMode = MovePathMode.Linear;
 
     [Tooltip("In Curve mode: arch height (1 = full path length), projected perpendicular to the baseline")]
     public AnimationCurve moveCurve = new AnimationCurve(
@@ -188,6 +230,9 @@ public class Drag : UdonSharpBehaviour
     private TriggerMoveMode _effectiveTriggerMode = TriggerMoveMode.Rail;
     private Vector3 _railDirection = Vector3.forward;
     private float _railLength = 1f;
+    private Vector3 _axisAnchor = Vector3.zero;
+    private Vector3 _axisDir = Vector3.up;
+    private float _axisLen = 1f;
 
     void Start()
     {
@@ -326,6 +371,30 @@ public class Drag : UdonSharpBehaviour
         return ByCenter() ? GetObjectCenter(obj) : obj.position;
     }
 
+    private void ComputeAxisLine()
+    {
+        _axisLen = Mathf.Max(axisLength, 0.001f);
+
+        if (axisSource == AxisSourceMode.ObjectAlign && axisObject != null)
+        {
+            Vector3 local = axisUp == AxisUp.X ? Vector3.right : (axisUp == AxisUp.Z ? Vector3.forward : Vector3.up);
+            _axisDir = (axisObject.rotation * local).normalized;
+            _axisAnchor = RefPoint(axisObject) + axisPositionOffset;
+            return;
+        }
+
+        if (axisSource == AxisSourceMode.Euler)
+        {
+            _axisDir = (Quaternion.Euler(axisEuler) * Vector3.up).normalized;
+            _axisAnchor = RefPoint(target) + axisPositionOffset;
+            return;
+        }
+
+        Vector3 d = axisEnd - axisStart;
+        _axisDir = (d.sqrMagnitude > 1e-8f) ? d.normalized : Vector3.up;
+        _axisAnchor = axisStart;
+    }
+
     private void CachePositions()
     {
         _startPosition = RefPoint(target);
@@ -341,16 +410,16 @@ public class Drag : UdonSharpBehaviour
 
         if (motionMode == MotionMode.Rotate)
         {
-            if (rotatePathMode == RotatePathMode.Axis)
+            if (rotateMode == RotateMode.Axis)
             {
-                Vector3 axis = axisEnd - axisStart;
-                _dragLength = axis.magnitude;
-                _dragDirection = (_dragLength > 1e-6f) ? axis / _dragLength : Vector3.up;
+                ComputeAxisLine();
+                _dragLength = _axisLen;
+                _dragDirection = _axisDir;
             }
             else
             {
-                _dragLength = rotationVector.magnitude;
-                _dragDirection = (_dragLength > 1e-6f) ? rotationVector / _dragLength : Vector3.up;
+                _dragLength = rotateVector.magnitude;
+                _dragDirection = (_dragLength > 1e-6f) ? rotateVector / _dragLength : Vector3.up;
             }
         }
         else
@@ -616,6 +685,7 @@ public class Drag : UdonSharpBehaviour
 
     private void ApplyPositionAndRotation(float t)
     {
+        if (motionMode == MotionMode.Rotate && rotateMode == RotateMode.Axis) ComputeAxisLine();
         Quaternion rot = GetRotationAt(t);
         Vector3 arm = rot * Quaternion.Inverse(_startRotation) * _centerArm;
         target.rotation = rot;
@@ -626,13 +696,12 @@ public class Drag : UdonSharpBehaviour
     {
         if (motionMode == MotionMode.Rotate)
         {
-            if (rotatePathMode == RotatePathMode.Axis)
+            if (rotateMode == RotateMode.Axis)
             {
-                Vector3 axis = axisEnd - axisStart;
-                if (axis.sqrMagnitude < 1e-8f) return _startRotation;
-                return _startRotation * Quaternion.AngleAxis(axisAngle * t, axis.normalized);
+                if (_axisDir.sqrMagnitude < 1e-8f) return _startRotation;
+                return _startRotation * Quaternion.AngleAxis(axisAngle * t, _axisDir);
             }
-            return Quaternion.Slerp(_startRotation, _startRotation * Quaternion.Euler(rotationVector), t);
+            return Quaternion.Slerp(_startRotation, _startRotation * Quaternion.Euler(rotateVector), t);
         }
 
         if (destinationMode == DestinationMode.DestinationTransform && destinationTransform != null)
@@ -659,7 +728,15 @@ public class Drag : UdonSharpBehaviour
 
     private Vector3 GetPositionAt(float t)
     {
-        if (motionMode == MotionMode.Rotate) return _startPosition;
+        if (motionMode == MotionMode.Rotate)
+        {
+            if (rotateMode == RotateMode.Axis)
+            {
+                Quaternion r = Quaternion.AngleAxis(axisAngle * t, _axisDir);
+                return _axisAnchor + r * (_startPosition - _axisAnchor);
+            }
+            return _startPosition;
+        }
 
         if (destinationMode == DestinationMode.PathPoints && pathPoints != null && pathPoints.Length >= 2)
         {
