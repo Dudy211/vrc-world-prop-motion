@@ -6,82 +6,91 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![VRChat](https://img.shields.io/badge/VRChat-UdonSharp-orange.svg)](https://vrchat.com)
-[![Latest Release](https://img.shields.io/github/v/release/Dudy211/vrc-world-prop-motion?include_prereleases)](https://github.com/Dudy211/vrc-world-prop-motion/releases)
 
-**VRC World Prop Motion** is a robust **UdonSharp** plugin designed for **VRChat World** creators.
-It allows you to animate props (objects) with precise control over movement, rotation, physics, and networking—no coding required.
+**VRC World Prop Motion** is a powerful **UdonSharp** plugin for **VRChat World** creators. Control props with precision—movement, rotation, physics, drag interaction, and network sync—no coding required.
 
-Perfect for elevators, sliding doors, intricate knobs, and physical tracks.
+Perfect for elevators, sliding doors, precision knobs, physical tracks, domino chains, and proximity-activated mechanisms.
 
 ## ✨ Key Features
 
 ### 🔄 Sender / Receiver Architecture
 *   **Receiver**: Attached to the object being moved. Executes transformations.
-*   **Sender**: Attached to buttons or handles. Triggers the Receiver.
-*   Supports **Interact** (click) and **Drag** (manual control) triggers.
+*   **Sender**: Attached to buttons/handles. Triggers the Receiver.
+*   Supports **Interact** (click), **Drag** (manual grab), and **Proximity** (player enters trigger) modes.
 
-### 📐 Advanced Motion Modes
-*   **Move**: Linear movement between points.
+### 📐 Advanced Motion
+*   **Move**: Linear or curve paths (AnimationCurve-controlled arches).
 *   **Rotate**:
-    *   **Spherical**: Smoothly interpolate between two rotations.
-    *   **Axis**: Rotate around a custom axis (Manual, Object Align, or Euler). Supports multi-turn rotations (e.g., 3600° knobs).
+    *   **Spherical**: Slerp between two orientations.
+    *   **Axis**: Rotate around a custom axis (Manual, Object Align, or Euler angle). Supports multi-turn (e.g., 3600° knobs).
+*   **Path Points**: Sequence through multiple Transform waypoints.
 
-### 🎢 Paths & Curves
-*   **Path Points**: Move through a sequence of Transforms.
-*   **Animation Curves**: Define height arcs and speed tweening (Easing).
-*   **Auto-Origin**: Automatically calculates path mid-points for curves.
+### 🎢 Curves & Physics
+*   **Curve Movement**: AnimationCurve defines arch height and speed tweening.
+*   **Gravity & Drag**: Simulate realistic physics on rails (gravity accelerates downhill, drag dampens velocity).
+*   **Speed Modes**: Fixed speed or curve-driven variable speed.
 
-### 🛠️ Physics & Interaction
-*   **Rail Mode**: Constrain dragging to a specific track.
-*   **Sync Target**: Hand syncs to the object for precise control.
-*   **Gravity & Drag**: Simulate realistic sliding physics.
-*   **Loop & PingPong**: Flexible path looping.
+### 🔗 Chain & Events
+*   **Domino Chains**: Trigger other Drags when reaching end/start (`nextOnReach`, `nextOnReturn`).
+*   **Path Point Events**: Call `OnPathPoint()` on UdonBehaviours at each waypoint.
+*   **Callbacks**: `OnReachDestination()` and `OnReachStart()` events.
 
 ### 🌐 Networking
-*   Stable synchronization using `UdonBehaviourSyncMode.Continuous`.
-*   Automatic ownership transfer handling.
+*   `UdonBehaviourSyncMode.Continuous` with configurable sync interval and minimum delta threshold.
+*   Smooth interpolation for non-owners.
+*   Auto ownership transfer on interaction.
 
 ### 🎨 Editor Enhancements
-*   **Trilingual UI**: Inspector supports **English, 日本語, and 中文**.
-*   **Scene View Gizmos**:
-    *   Visualize paths, destinations, and rotation axes.
-    *   Drag handles for adjusting vectors directly in the Scene view.
-*   **Auto-Initialization**: Automatically generates `Drag.asset` to prevent UdonSharp reference errors.
+*   **Trilingual UI**: English, 日本語, 中文.
+*   **Scene View Tools**:
+    *   Axis start/end handles (drag in Scene).
+    *   Curve origin handle (yellow sphere).
+    *   World axis alignment buttons (X/Y/Z).
+    *   Ghost mesh previews between start and end.
+    *   Chain relation preview (upstream/downstream Drags).
+*   **Auto-Initialization**: `Drag.asset` generated automatically on import.
 
 ## 📦 Installation
 
-1.  Ensure **UdonSharp** is installed via **VCC** (included with the Worlds SDK).
-2.  Download the latest `vrc-world-prop-motion.unitypackage` from the [Releases](https://github.com/Dudy211/vrc-world-prop-motion/releases) page.
-3.  Import it into your Unity project.
-4.  If `Drag.asset` fails to generate, use the menu: **`Tools > VRC Prop Motion > Setup Drag Program Asset`**.
+1.  Ensure **UdonSharp** is installed via **VCC** (included with Worlds SDK).
+2.  Download `vrc-world-prop-motion.unitypackage` from [Releases](https://github.com/Dudy211/vrc-world-prop-motion/releases).
+3.  Import into Unity. If `Drag.asset` fails to generate, use **`Tools > VRC Prop Motion > Setup Drag Program Asset`**.
 
 ## 🚀 Quick Start
 
-### Moving a Prop (Receiver)
-1.  Attach `Drag.cs` to your prop.
-2.  Set **Role** to `Receiver`.
-3.  Set **Motion Mode** to `Move`.
-4.  Configure **Destination Mode** (e.g., Offset Vector) and adjust the **Offset**.
-5.  Enter Play mode or trigger via Interact/Drag.
+### Receiver (Moving Object)
+1.  Attach `Drag.cs` to the object to move.
+2.  Set **Role** → `Receiver`, **Motion Mode** → `Move`.
+3.  Set **Target** to itself (or leave default).
+4.  Configure **Destination Mode** (Offset Vector / Destination Transform / Path Points).
+5.  Trigger via Interact, Drag, or Proximity.
 
-### Creating a Draggable Door (Sender + Receiver)
-1.  **Receiver**: Attach to the door. Set the destination position.
-2.  **Sender**: Attach to the door handle.
-    *   **Role**: `Sender`
-    *   **Receiver**: Assign the door object.
-    *   **Interaction Mode**: `Drag`
-    *   **Trigger Move Mode**: `Rail`.
-3.  Grab the handle in-game to slide the door.
+### Sender + Receiver (Draggable Door)
+1.  **Receiver**: On the door. Set destination.
+2.  **Sender**: On the door handle. Set **Role** → `Sender`, assign **Receiver**.
+3.  **Trigger Move Mode**: `Rail` (slides along track) or `SyncTarget` (follows door).
+4.  Grab handle in-game to slide door.
+
+### Proximity Trigger
+1.  Receiver on the mechanism. **Interaction Mode** → `Proximity`.
+2.  Add a **Collider** (Is Trigger = ON) on the **same GameObject**.
+3.  Player entering the collider starts movement automatically.
+
+### Axis Rotation (Knob/Dial)
+1.  Receiver on the knob. **Motion Mode** → `Rotate`, **Rotate Mode** → `Axis`.
+2.  **Axis Source**: `Object Align` (aligns to knob's local Y axis).
+3.  **Axis Angle**: `360` (or `720`, `3600` for multi-turn).
+4.  Add a Sender (handle) and configure Drag interaction.
 
 ## ⚠️ Troubleshooting
 
-### 1. `Program Source is None` Error
-*   Ensure `Assets/VRCPropMotion/Drag.asset` exists.
-*   If missing, use the menu `Tools > VRC Prop Motion > Setup Drag Program Asset`.
-
-### 2. `Drag.cs is referenced by 2 UdonSharpProgramAssets`
-*   **Cause**: A naming conflict with another plugin (e.g., Ohmiwa examples).
-*   **Fix**: Delete `Assets/VRCPropMotion/Drag.asset` to let UdonSharp use the existing reference, or rename `Drag.cs` to `VRCPropMotionDrag.cs`.
+| Issue | Solution |
+|-------|----------|
+| `Program Source is None` | Use `Tools > VRC Prop Motion > Setup Drag Program Asset` |
+| `Drag.cs referenced by 2 UdonSharpProgramAssets` | Delete `Drag.asset` to let UdonSharp use existing reference, or rename `Drag.cs` |
+| Drag not responding | Trigger needs `VRC_Pickup` + `Collider` + `Rigidbody` |
+| Scene axis handle hard to grab | Drag XYZ arrows instead of center; or type offset in Inspector first |
+| After editing Drag.cs fields, Inspector shows wrong data | Delete `Drag.asset` + `.meta`, regenerate via Tools menu |
 
 ## 📜 License
-Licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE).
