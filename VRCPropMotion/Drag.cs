@@ -64,7 +64,8 @@ public enum SpeedMode
 public enum InteractionMode
 {
     Interact,
-    Drag
+    Drag,
+    Proximity
 }
 
 public enum RoleMode
@@ -103,7 +104,7 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("How to trigger movement")]
     public InteractionMode interactionMode;
 
-    [Tooltip("Trigger object: clicked in Interact mode, grabbed & dragged in Drag mode")]
+    [Tooltip("Trigger object: clicked in Interact mode, grabbed & dragged in Drag mode. Proximity mode: the trigger Collider (Is Trigger) must be on THIS GameObject")]
     public Transform trigger;
 
     [Tooltip("Drag mode: how the trigger handle itself moves (Free = carried by hand; SyncTarget = rigidly follows target; Rail = slides on the rail line)")]
@@ -166,9 +167,6 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("Loop = repeat path freely; PingPong = stay on the start<->end track")]
     public LoopMode loopMode;
 
-    [Tooltip("UdonBehaviour to call OnReachDestination() on when reaching the end")]
-    public UdonBehaviour onReachDestination;
-
     [Tooltip("Path reference point: Pivot = transform position; Center = renderer bounds center")]
     public PathBase pathBase = PathBase.Pivot;
 
@@ -191,6 +189,40 @@ public class Drag : UdonSharpBehaviour
 
     [Tooltip("Cart on a rigid rail: gravity accelerates downhill / decelerates uphill along the path")]
     public float gravityScale = 1.0f;
+
+    [Tooltip("UdonBehaviour to call OnReachDestination() on when reaching the end")]
+    public UdonBehaviour onReachDestination;
+
+    [Tooltip("UdonBehaviour to call OnReachStart() on when returning to the start (PingPong)")]
+    public UdonBehaviour onReachStart;
+
+    [Tooltip("Drag components to trigger (TryStartDrag) when reaching the END — domino chains")]
+    public Drag[] nextOnReach;
+
+    [Tooltip("Drag components to trigger (TryStartDrag) when returning to the START (PingPong)")]
+    public Drag[] nextOnReturn;
+
+    [Tooltip("UdonBehaviours called with OnPathPoint() when passing path point i (PathPoints mode, index matches pathPoints)")]
+    public UdonBehaviour[] onPathPointEvents;
+
+    [Tooltip("Owner sends sync at most every N frames (1 = every frame)")]
+    public int syncEveryNFrames = 1;
+
+    [Tooltip("Force a sync when |progress| changed more than this since the last send")]
+    public float syncMinDelta = 0.002f;
+
+    [Header("Drag Options")]
+    [Tooltip("Drag mode: after release, progress returns to 0 at this speed along the path (units/sec; 0 = stay where released)")]
+    public float snapBackSpeed = 0f;
+
+    [Tooltip("Drag mode: while someone holds the handle, other players cannot trigger via click / proximity")]
+    public bool lockWhileHeld = false;
+
+    [Tooltip("Editor: ghost wireframe slices between start and end (0 = off)")]
+    public int previewGhostSteps = 0;
+
+    [Tooltip("Editor: show previews of chained Drags (levels up/downstream, 0 = off)")]
+    public int previewRelationDepth = 0;
 
     public bool previewDestination;
     public bool previewPath;
@@ -233,12 +265,25 @@ public class Drag : UdonSharpBehaviour
     private Vector3 _axisAnchor = Vector3.zero;
     private Vector3 _axisDir = Vector3.up;
     private float _axisLen = 1f;
+    private bool _axisDynamic = false;
+    private float _remoteT = 0f;
+    private float _displayT = 0f;
+    private bool _hasRemoteTarget = false;
+    private int _framesSinceSync = 0;
+    private float _lastSentT = -1f;
+    private bool _snapping = false;
+    private int _lastPathSeg = -1;
+    private bool _dragEndFired = false;
+    private bool _dragStartFired = true;
 
     void Start()
     {
         if (role == RoleMode.Sender) return;
 
+        _displayT = _t;
         CachePositions();
+        _dragStartFired = (_t <= 0f);
+        _dragEndFired = (_t >= 1f);
         if (target != null)
         {
             Debug.Log("[Drag] " + target.name + " 基准: " + pathBase + " | 起点: " + _startPosition + " | 终点: " + _endPosition + " | 偏移: " + (destinationMode == DestinationMode.DestinationTransform ? relativePositionOffset : offsetVector));
@@ -260,6 +305,10 @@ public class Drag : UdonSharpBehaviour
         if (interactionMode == InteractionMode.Drag && !_triggerIsPickup)
         {
             Debug.LogWarning("[Drag] 拖动模式下，触发物体需要挂 VRC_Pickup（含 Collider + Rigidbody）");
+        }
+        if (interactionMode == InteractionMode.Proximity && GetComponent<Collider>() == null)
+        {
+            Debug.LogWarning("[Drag] 靠近触发模式下，本组件所在物体需要有 Collider (Is Trigger)");
         }
         SetupRail();
     }
@@ -299,13 +348,24 @@ public class Drag : UdonSharpBehaviour
     public override void OnOwnershipTransferred(VRCPlayerApi player)
     {
         _isOwner = Networking.IsOwner(gameObject);
+        if (_isOwner)
+        {
+            // 接管：以当前同步值为准，避免新旧主人进度不一致
+            _displayT = _t;
+        }
     }
 
     public override void OnDeserialization()
     {
         if (!_isOwner && target != null)
         {
-            ApplyPositionAndRotation(_t);
+            _remoteT = _t;
+            if (!_hasRemoteTarget)
+            {
+                _hasRemoteTarget = true;
+                _displayT = _t;
+                ApplyPositionAndRotation(_displayT);
+            }
         }
     }
 
@@ -325,9 +385,23 @@ public class Drag : UdonSharpBehaviour
         }
     }
 
+    public override void OnPlayerTriggerEnter(VRCPlayerApi player)
+    {
+        if (role == RoleMode.Sender) return;
+        if (interactionMode != InteractionMode.Proximity) return;
+        if (player == null || !player.IsValid() || !player.isLocal) return;
+        TryStartDrag();
+    }
+
     public void TryStartDrag()
     {
         if (target == null) return;
+
+        if (lockWhileHeld && _triggerIsPickup && _triggerPickup != null)
+        {
+            VRCPlayerApi holderNow = _triggerPickup.currentPlayer;
+            if (holderNow != null && !holderNow.isLocal) return; // 他人抓住期间禁止远程触发
+        }
 
         VRCPlayerApi localPlayer = Networking.LocalPlayer;
         if (localPlayer != null && !Networking.IsOwner(gameObject))
@@ -336,6 +410,7 @@ public class Drag : UdonSharpBehaviour
         }
         _isOwner = true;
         _v = 0f;
+        _snapping = false;
 
         if (loopMode == LoopMode.PingPong)
         {
@@ -352,12 +427,42 @@ public class Drag : UdonSharpBehaviour
         }
         else
         {
-            CachePositions();
+            // 只有静止时才重取基准：运动中再次触发保留原始起终点、从头重播，
+            // 避免把当前位置当作新起点导致终点漂移
+            if (!_isMoving) CachePositions();
             _t = 0f;
             _isMoving = true;
             _direction = 1;
         }
         RequestSerialization();
+    }
+
+    public void SetProgress(float t)
+    {
+        if (role == RoleMode.Sender) return;
+        if (target == null) return;
+        VRCPlayerApi localPlayer = Networking.LocalPlayer;
+        if (localPlayer != null && !Networking.IsOwner(gameObject))
+        {
+            Networking.SetOwner(localPlayer, gameObject);
+        }
+        _isOwner = true;
+        _isMoving = false;
+        _v = 0f;
+        _snapping = false;
+        _t = Mathf.Clamp01(t);
+        ApplyPositionAndRotation(_t);
+        RequestSerialization();
+    }
+
+    public void GoToStart()
+    {
+        SetProgress(0f);
+    }
+
+    public void GoToEnd()
+    {
+        SetProgress(1f);
     }
 
     private bool ByCenter()
@@ -407,12 +512,16 @@ public class Drag : UdonSharpBehaviour
         }
         _centerArm = ByCenter() ? GetObjectCenter(target) - target.position : Vector3.zero;
         _pathLength = ComputePathLength();
+        _lastPathSeg = CurrentPathSeg();
 
         if (motionMode == MotionMode.Rotate)
         {
             if (rotateMode == RotateMode.Axis)
             {
                 ComputeAxisLine();
+                // 轴定义在目标自身/子级时，旋转会带动锚点形成反馈（抽搐/位移），
+                // 只有轴来自目标之外（如独立的对齐物体且它自己还会动）才每帧跟随
+                _axisDynamic = axisObject != null && !axisObject.IsChildOf(target);
                 _dragLength = _axisLen;
                 _dragDirection = _axisDir;
             }
@@ -488,14 +597,104 @@ public class Drag : UdonSharpBehaviour
         return Mathf.Max(Vector3.Distance(_startPosition, _endPosition), 0.001f);
     }
 
+    private int CurrentPathSeg()
+    {
+        if (destinationMode != DestinationMode.PathPoints || pathPoints == null || pathPoints.Length < 2) return -1;
+        return Mathf.Clamp(Mathf.FloorToInt(_t * (pathPoints.Length - 1)), 0, pathPoints.Length - 2);
+    }
+
+    private void FirePathPointEvents(int prevSeg, int newSeg)
+    {
+        if (onPathPointEvents == null || onPathPointEvents.Length == 0) return;
+        if (prevSeg < 0 || newSeg <= prevSeg) return;
+        for (int k = prevSeg + 1; k <= newSeg && k < onPathPointEvents.Length; k++)
+        {
+            if (onPathPointEvents[k] != null)
+            {
+                onPathPointEvents[k].SendCustomEvent("OnPathPoint");
+            }
+        }
+    }
+
     private void Update()
     {
         if (role == RoleMode.Sender) return;
         if (target == null) return;
+
+        if (!_isOwner)
+        {
+            UpdateRemoteSmoothing();
+            return;
+        }
+
+        if (_snapping)
+        {
+            UpdateSnapBack();
+            return;
+        }
+
         if (interactionMode != InteractionMode.Interact) return;
-        if (!_isOwner) return;
         if (!_isMoving) return;
         UpdateAutoMovement();
+    }
+
+    private void UpdateRemoteSmoothing()
+    {
+        if (!_hasRemoteTarget) return;
+        float k = 1f - Mathf.Exp(-12f * Time.deltaTime);
+        _displayT = Mathf.Lerp(_displayT, _remoteT, k);
+        if (Mathf.Abs(_displayT - _remoteT) < 0.0005f) _displayT = _remoteT;
+        ApplyPositionAndRotation(_displayT);
+    }
+
+    private void UpdateSnapBack()
+    {
+        if (interactionMode != InteractionMode.Drag) { _snapping = false; return; }
+        if (_triggerPickup != null && _triggerPickup.currentPlayer != null) { _snapping = false; return; }
+
+        _t = Mathf.MoveTowards(_t, 0f, snapBackSpeed * Time.deltaTime / Mathf.Max(_pathLength, 0.001f));
+        _isMoving = _t > 0f;
+        ApplyPositionAndRotation(_t);
+
+        if (trigger != null)
+        {
+            if (_effectiveTriggerMode == TriggerMoveMode.SyncTarget && target != null)
+            {
+                trigger.position = target.TransformPoint(_triggerRestLocalPos);
+                trigger.rotation = target.rotation * _triggerRestLocalRot;
+            }
+            else if (_effectiveTriggerMode == TriggerMoveMode.Rail)
+            {
+                trigger.position = _triggerRestPosition + _railDirection * (_t * _railLength);
+                trigger.rotation = _triggerRestRotation;
+            }
+            else
+            {
+                trigger.position = _triggerRestPosition + _dragDirection * (_t * _dragLength);
+                trigger.rotation = _triggerRestRotation;
+            }
+            if (_triggerRb != null)
+            {
+                _triggerRb.velocity = Vector3.zero;
+                _triggerRb.angularVelocity = Vector3.zero;
+            }
+        }
+
+        bool done = _t <= 0f;
+        if (done) _snapping = false;
+        SyncIfNeeded(done);
+    }
+
+    private void SyncIfNeeded(bool force)
+    {
+        _framesSinceSync++;
+        int interval = syncEveryNFrames < 1 ? 1 : syncEveryNFrames;
+        if (force || _framesSinceSync >= interval || Mathf.Abs(_t - _lastSentT) >= syncMinDelta)
+        {
+            _framesSinceSync = 0;
+            _lastSentT = _t;
+            RequestSerialization();
+        }
     }
 
     private void LateUpdate()
@@ -508,6 +707,8 @@ public class Drag : UdonSharpBehaviour
         VRCPlayerApi holder = _triggerPickup.currentPlayer;
         if (holder != null && _lastHolder == null)
         {
+            // 抓住瞬间：取消回弹，重新基准
+            _snapping = false;
             Vector3 actDir = (_effectiveTriggerMode == TriggerMoveMode.Rail) ? _railDirection : _dragDirection;
             float actLen = (_effectiveTriggerMode == TriggerMoveMode.Rail) ? _railLength : _dragLength;
             _triggerStartPosition = trigger.position - actDir * (_t * actLen);
@@ -545,6 +746,10 @@ public class Drag : UdonSharpBehaviour
                     _triggerRb.velocity = Vector3.zero;
                     _triggerRb.angularVelocity = Vector3.zero;
                 }
+            }
+            if (_isOwner && snapBackSpeed > 0f && _t > 0f)
+            {
+                _snapping = true;
             }
             _lastHolder = holder;
             return;
@@ -596,12 +801,20 @@ public class Drag : UdonSharpBehaviour
 
         ApplyPositionAndRotation(_t);
 
+        int seg = CurrentPathSeg();
+        if (seg > _lastPathSeg) FirePathPointEvents(_lastPathSeg, seg);
+        _lastPathSeg = seg;
+
         if (reachedEnd)
         {
-            HandleReachedEnd();
+            if (_direction > 0) HandleReachedEnd();
+            else HandleReachedStart();
+            SyncIfNeeded(true);
         }
-
-        RequestSerialization();
+        else
+        {
+            SyncIfNeeded(false);
+        }
     }
 
     private void UpdateDragMovement()
@@ -640,6 +853,30 @@ public class Drag : UdonSharpBehaviour
         _isMoving = (progress < 1f);
         ApplyPositionAndRotation(_t);
 
+        int seg = CurrentPathSeg();
+        if (seg > _lastPathSeg) FirePathPointEvents(_lastPathSeg, seg);
+        _lastPathSeg = seg;
+
+        // 拖过终点/起点：触发 Drag 链（边沿检测——按住终点不重复触发，拉回后再推过才再次触发）
+        bool atEnd = progress >= 1f;   // 用 progress：Loop 回绕后 _t 已跳回 [0,1)，检测会漏
+        bool atStart = progress <= 0f;
+        if (atEnd && !_dragEndFired)
+        {
+            _dragEndFired = true;
+            HandleReachedEnd();
+            SyncIfNeeded(true);
+            return;
+        }
+        if (atStart && !_dragStartFired)
+        {
+            _dragStartFired = true;
+            HandleReachedStart();
+            SyncIfNeeded(true);
+            return;
+        }
+        if (!atEnd) _dragEndFired = false;
+        if (!atStart) _dragStartFired = false;
+
         if (_effectiveTriggerMode == TriggerMoveMode.SyncTarget && target != null)
         {
             trigger.position = target.TransformPoint(_triggerRestLocalPos);
@@ -651,7 +888,7 @@ public class Drag : UdonSharpBehaviour
             }
         }
 
-        RequestSerialization();
+        SyncIfNeeded(false);
     }
 
     private void HandleReachedEnd()
@@ -660,6 +897,28 @@ public class Drag : UdonSharpBehaviour
         _v = 0f;
         ApplyPositionAndRotation(_t);
         InvokeReachEvent();
+        if (nextOnReach != null)
+        {
+            for (int i = 0; i < nextOnReach.Length; i++)
+            {
+                if (nextOnReach[i] != null) nextOnReach[i].TryStartDrag();
+            }
+        }
+    }
+
+    private void HandleReachedStart()
+    {
+        _isMoving = false;
+        _v = 0f;
+        ApplyPositionAndRotation(_t);
+        InvokeReturnEvent();
+        if (nextOnReturn != null)
+        {
+            for (int i = 0; i < nextOnReturn.Length; i++)
+            {
+                if (nextOnReturn[i] != null) nextOnReturn[i].TryStartDrag();
+            }
+        }
     }
 
     private void InvokeReachEvent()
@@ -683,9 +942,30 @@ public class Drag : UdonSharpBehaviour
         }
     }
 
+    private void InvokeReturnEvent()
+    {
+        if (onReachStart != null)
+        {
+            onReachStart.SendCustomEvent("OnReachStart");
+        }
+
+        switch (language)
+        {
+            case Language.English:
+                Debug.Log("[Drag] Returned to start");
+                break;
+            case Language.Japanese:
+                Debug.Log("[Drag] 始点に戻りました");
+                break;
+            case Language.Chinese:
+                Debug.Log("[Drag] 已返回起点");
+                break;
+        }
+    }
+
     private void ApplyPositionAndRotation(float t)
     {
-        if (motionMode == MotionMode.Rotate && rotateMode == RotateMode.Axis) ComputeAxisLine();
+        if (motionMode == MotionMode.Rotate && rotateMode == RotateMode.Axis && _axisDynamic) ComputeAxisLine();
         Quaternion rot = GetRotationAt(t);
         Vector3 arm = rot * Quaternion.Inverse(_startRotation) * _centerArm;
         target.rotation = rot;
