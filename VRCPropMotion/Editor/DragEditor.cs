@@ -16,6 +16,7 @@ public class DragEditor : Editor
     private enum ETrig { Free = 0, SyncTarget = 1, Rail = 2 }
 
     private Drag _drag;
+    private bool _showHelp = false;
     private readonly Dictionary<string, SerializedProperty> _props = new Dictionary<string, SerializedProperty>();
 
     private enum EAxisSource { Manual = 0, ObjectAlign = 1, Euler = 2 }
@@ -32,9 +33,9 @@ public class DragEditor : Editor
         };
         _interactModeNames = new[]
         {
-            new[] { "Interact (Click Trigger)", "Drag (Drag Trigger)" },
-            new[] { "インタラクト (クリック)", "ドラッグ (ドラッグ)" },
-            new[] { "交互触发 (点击)", "拖动控制 (拖拽)" }
+            new[] { "Interact (Click Trigger)", "Drag (Drag Trigger)", "Proximity (Player Enters)" },
+            new[] { "インタラクト (クリック)", "ドラッグ (ドラッグ)", "近接 (プレイヤー进入)" },
+            new[] { "交互触发 (点击)", "拖动控制 (拖拽)", "靠近触发 (玩家进入)" }
         };
         _loopModeNames = new[]
         {
@@ -139,7 +140,7 @@ public class DragEditor : Editor
             case "AxisLength":   return new[] { "Axis Length (m)", "軸の長さ (m)", "轴长度 (米)" }[l];
             case "AxisObject":   return new[] { "Align Object", "基準オブジェクト", "对齐物体" }[l];
             case "AxisUp":       return new[] { "Up Axis (local)", "上方向 (ローカル)", "为上轴向 (本地)" }[l];
-            case "AxisPosOffset":return new[] { "Position Offset (Scene draggable)", "位置オフセット", "位置偏移 (场景可拖)" }[l];
+            case "AxisPosOffset":return new[] { "Position Offset (drag axis midpoint)", "位置オフセット（軸中点をドラッグ）", "位置偏移 (场景拖轴中点)" }[l];
             case "AxisEuler":    return new[] { "3D Angle / Euler (deg)", "三次元角度 (度)", "三维角度 (欧拉角)" }[l];
             case "AlignWorldAxis":return new[] { "Align to World Axis", "世界軸に合わせる", "对齐到世界轴" }[l];
             case "MovePath":     return new[] { "Move Path", "移動パス", "移动路径" }[l];
@@ -156,6 +157,58 @@ public class DragEditor : Editor
             case "PreviewMesh":  return new[] { "Preview Mesh", "プレビューメッシュ", "预览网格" }[l];
             case "EditEnd":      return new[] { "Drag Destination (Offset mode)", "終点をドラッグ（オフセット）", "拖拽终点（位移模式）" }[l];
             case "CurveHelp":    return new[] { "Curve Y = arch height (1 = path length).\nYellow P handle: drag freely or per-axis in the Scene view.", "曲線のY軸＝アーチ高（1＝経路全長）。\nシーンビューで黄色のPハンドルをドラッグ（自由／単軸）。", "曲线 Y 轴 = 拱桥高度 (1格 = 路径全长)。\n原点 P 手柄可在 Scene 视图 XYZ 任意拖 / 单轴拖。" }[l];
+            case "HelpBtn":      return new[] { "Help", "ヘルプ", "帮助" }[l];
+            case "HelpQuick":    return new[]
+            {
+                "Quick Start — Receiver: put Drag on a manager object, set Target (moves) and Trigger (clicked/grabbed). Sender: put a second Drag (role = Sender) on the object to click, and set its Receiver. Drag interaction: the Trigger needs VRC_Pickup (Collider + Rigidbody). Trigger move: Free = carried by hand; Sync Target = rigidly follows the target; Rail = slides along the rail line.",
+                "クイックスタート — 受信側：管理用オブジェクトに Drag を付け、Target（動かす物体）と Trigger（クリック／掴む物体）を設定。送信側：クリックされる物体にもう一枚 Drag（役割＝送信側）を付け、Receiver に受信側を指定。ドラッグ操作では Trigger に VRC_Pickup（Collider＋Rigidbody）が必須。トリガー移動：自由＝手で運ぶ／対象と同期＝物体に追随／レール＝軌道上を滑る。",
+                "快速上手 — 接收端：把 Drag 挂在管理物体上，设置 Target（要动的物体）与 Trigger（被点击/被抓的物体）。发送端：在要点击的物体上再挂一个 Drag（端类型＝发送端），Receiver 指向接收端。拖动交互：Trigger 必须挂 VRC_Pickup（Collider + Rigidbody）。触发移动方式：自由拖动＝随手走；同步移动＝刚性跟随目标；固定轨道＝沿轨道线滑动。"
+            }[l];
+            case "HelpAsset":    return new[]
+            {
+                "IMPORTANT — Drag.asset is the compiled UdonSharp program of Drag.cs. If you edit FIELDS in Drag.cs and the Inspector shows missing/wrong fields or behavior does not change: delete Drag.asset (and its .meta), then run Tools → VRC Prop Motion → Setup Drag Program Asset. The auto-initializer only creates the asset when it is missing; it never detects source changes. Editor-only script changes need no rebuild.",
+                "重要 — Drag.asset は Drag.cs をコンパイルした UdonSharp プログラムです。Drag.cs のフィールドを編集後、インスペクターの項目が消えた／動作が変わらない場合は Drag.asset（と .meta）を削除し、Tools → VRC Prop Motion → Setup Drag Program Asset を実行してください。自動生成は資産が無い時のみで、ソース変更は検知しません。Editor/ だけの変更は再生成不要です。",
+                "重要 — Drag.asset 是 Drag.cs 编译出的 UdonSharp 程序资产。修改 Drag.cs 的字段后，若 Inspector 字段缺失/异常或行为没有变化：删除 Drag.asset（连同 .meta），再执行菜单 Tools → VRC Prop Motion → Setup Drag Program Asset。自动初始化只在资产缺失时创建，不会检测源码变更；只改 Editor/ 下脚本则无需重建。"
+            }[l];
+            case "HelpSync":     return new[]
+            {
+                "Sync — Progress is UdonSynced (continuous): the owner sends every frame, non-owners apply position on deserialization. Reaching the end calls OnReachDestination() on the UdonBehaviour assigned in On Reach Destination.",
+                "同期 — 進行度は UdonSynced（連続）で、オーナーが毎フレーム送信し、非オーナーは受信時に位置を適用します。終点に到達すると「到達イベント」に設定した UdonBehaviour の OnReachDestination() が呼ばれます。",
+                "同步 — 进度通过 UdonSynced（连续模式）同步：主人每帧发送，非主人在反序列化时直接应用位置。到达终点时会调用「到达触发事件」里配置的 UdonBehaviour 的 OnReachDestination()。"
+            }[l];
+            case "HelpTrouble":  return new[]
+            {
+                "Troubleshooting — Drag not responding: the Trigger needs VRC_Pickup + Collider + Rigidbody. Scene axis handle hard to grab: it can overlap the selected object's native move gizmo; drag its XYZ arrows instead, or type a small offset in the Inspector first.",
+                "トラブル対応 — ドラッグが反応しない：Trigger に VRC_Pickup＋Collider＋Rigidbody が必要。シーンの軸ハンドルが掴みにくい：選択中オブジェクトの標準ギズモと重なることがあります。XYZ の矢印を掴むか、先に小さなオフセットを入力してください。",
+                "常见问题 — 拖不动：Trigger 需要 VRC_Pickup + Collider + Rigidbody。场景轴手柄难拖：可能和选中物体的原生移动 Gizmo 重叠，改拖它的 XYZ 彩色箭头，或先在 Inspector 里输一个小偏移。"
+            }[l];
+            case "ChainTitle":   return new[] { "Chain / Events", "連鎖 / イベント", "事件与连锁" }[l];
+            case "PreviewRelDepth": return new[] { "Chain Preview Depth (0 = off)", "連鎖プレビュー深さ (0=無効)", "关联预览深度 (0=关)" }[l];
+            case "RelDown":      return new[] { "Downstream (this triggers)", "下流（自分が触发）", "下游（我触发它）" }[l];
+            case "RelUp":        return new[] { "Upstream (triggers this)", "上流（自分を触发）", "上游（它触发我）" }[l];
+            case "OnReachStart": return new[] { "On Reach Start (Return)", "折返イベント", "返回起点事件" }[l];
+            case "NextOnReach":  return new[] { "Next On Reach (Drag[])", "到達で次を起動", "到达后触发 (Drag 链)" }[l];
+            case "NextOnReturn": return new[] { "Next On Return (Drag[])", "折返で次を起動", "返回后触发 (Drag 链)" }[l];
+            case "PathPointEvents": return new[] { "Path Point Events", "パス点イベント", "路径点事件" }[l];
+            case "NetTitle":     return new[] { "Network", "ネットワーク", "网络同步" }[l];
+            case "SyncEveryN":   return new[] { "Sync Every N Frames", "同期間隔 (フレーム)", "同步间隔 (帧)" }[l];
+            case "SyncMinDelta": return new[] { "Sync Min Delta", "同期しきい値", "同步最小变化" }[l];
+            case "DragOptTitle": return new[] { "Drag Options", "ドラッグ設定", "拖动选项" }[l];
+            case "SnapBack":     return new[] { "Snap Back Speed (0 = off)", "戻る速度 (0=無効)", "回弹速度 (0=关闭)" }[l];
+            case "LockHeld":     return new[] { "Lock While Held", "保持中は他者触发を禁止", "抓住时锁定触发" }[l];
+            case "PreviewGhosts":return new[] { "Ghost Slices (0 = off)", "中間分割数 (0=無効)", "中途预览份数 (0=关)" }[l];
+            case "HelpChain":    return new[]
+            {
+                "New — Events: On Reach Destination / On Reach Start, Next On Reach/Return chains other Drags (domino), Path Point Events. Proximity mode starts when a player enters (collider on this GameObject). Snap Back returns the handle after release. Non-owners see interpolated motion; sync can be throttled under Network.",
+                "新機能 — イベント：到達／折返イベント、Drag チェーン（多米诺）、パス点イベント。近接モードはプレイヤー进入で開始（コライダーはこの物体に）。リリース後にハンドルを戻す設定あり。非オーナーは補間表示、ネットワーク節約も設定可。",
+                "新增 — 事件：到达/返回事件、Drag 连锁触发（多米诺）、路径点事件。靠近触发模式玩家进入即启动（碰撞体在本物体上）。回弹让松手后把手自动复位。非主人端插值平滑，网络节可在「网络同步」里调。"
+            }[l];
+            case "ProximityHelp":return new[]
+            {
+                "Proximity mode: put this Drag component and the trigger Collider (Is Trigger = ON) on the SAME GameObject. Movement starts when a player enters.",
+                "近接モード：この Drag とトリガー用 Collider（Is Trigger=ON）は同じ GameObject に置いてください。プレイヤーが进入すると開始します。",
+                "靠近触发模式：本 Drag 组件与触发碰撞体（勾选 Is Trigger）必须挂在同一个物体上，玩家进入时启动。"
+            }[l];
             default:             return k;
         }
     }
@@ -231,6 +284,16 @@ public class DragEditor : Editor
         CacheProperty("previewPath");
         CacheProperty("editEndPosition");
         CacheProperty("previewMesh");
+        CacheProperty("onReachStart");
+        CacheProperty("nextOnReach");
+        CacheProperty("nextOnReturn");
+        CacheProperty("onPathPointEvents");
+        CacheProperty("syncEveryNFrames");
+        CacheProperty("syncMinDelta");
+        CacheProperty("snapBackSpeed");
+        CacheProperty("lockWhileHeld");
+        CacheProperty("previewGhostSteps");
+        CacheProperty("previewRelationDepth");
 
         // 兼容旧工程: 手动模式下 axisLength 与 |axisEnd - axisStart| 同步一次
         var asP = Get("axisStart");
@@ -282,6 +345,21 @@ public class DragEditor : Editor
         serializedObject.Update();
 
         Draw("language", T("Language"));
+
+        // 帮助按钮：位于角色分支之前，接收端/发送端均可用，内容跟随语言设置
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        if (GUILayout.Button(T("HelpBtn"), EditorStyles.miniButton, GUILayout.Width(70)))
+            _showHelp = !_showHelp;
+        EditorGUILayout.EndHorizontal();
+        if (_showHelp)
+        {
+            EditorGUILayout.HelpBox(T("HelpQuick"), MessageType.None);
+            EditorGUILayout.HelpBox(T("HelpAsset"), MessageType.Warning);
+            EditorGUILayout.HelpBox(T("HelpSync"), MessageType.None);
+            EditorGUILayout.HelpBox(T("HelpChain"), MessageType.None);
+            EditorGUILayout.HelpBox(T("HelpTrouble"), MessageType.None);
+        }
 
         var roleProp = Get("role");
         if (roleProp != null)
@@ -343,6 +421,10 @@ public class DragEditor : Editor
             interactMode.enumValueIndex = EditorGUILayout.Popup(T("InteractMode"), interactMode.enumValueIndex, _interactModeNames[Lang]);
 
         DrawAlias(new[] { "trigger", "triggerObject", "triggerTransform" }, T("TriggerObj"));
+
+        var imProp0 = Get("interactionMode");
+        if (imProp0 != null && imProp0.enumValueIndex == 2)
+            EditorGUILayout.HelpBox(T("ProximityHelp"), MessageType.Info);
 
         EditorGUILayout.Space();
 
@@ -476,7 +558,27 @@ public class DragEditor : Editor
         if (loopMode != null)
             loopMode.enumValueIndex = EditorGUILayout.Popup(T("LoopMode"), loopMode.enumValueIndex, _loopModeNames[Lang]);
 
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField(T("ChainTitle"), EditorStyles.boldLabel);
         Draw("onReachDestination", T("OnReach"));
+        Draw("onReachStart", T("OnReachStart"));
+        Draw("nextOnReach", T("NextOnReach"));
+        Draw("nextOnReturn", T("NextOnReturn"));
+        if (dMode == 2) Draw("onPathPointEvents", T("PathPointEvents"));
+
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField(T("NetTitle"), EditorStyles.boldLabel);
+        Draw("syncEveryNFrames", T("SyncEveryN"));
+        Draw("syncMinDelta", T("SyncMinDelta"));
+
+        var imProp = Get("interactionMode");
+        if (imProp != null && imProp.enumValueIndex == 1)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(T("DragOptTitle"), EditorStyles.boldLabel);
+            Draw("snapBackSpeed", T("SnapBack"));
+            Draw("lockWhileHeld", T("LockHeld"));
+        }
 
         EditorGUILayout.Space();
 
@@ -489,6 +591,10 @@ public class DragEditor : Editor
                 Draw("editEndPosition", T("EditEnd"));
         }
         Draw("previewPath", T("PreviewPath"));
+        var pdToggle = Get("previewDestination");
+        using (new EditorGUI.DisabledScope(pdToggle == null || !pdToggle.boolValue))
+            Draw("previewGhostSteps", T("PreviewGhosts"));
+        Draw("previewRelationDepth", T("PreviewRelDepth"));
         Draw("previewMesh", T("PreviewMesh"));
 
         serializedObject.ApplyModifiedProperties();
@@ -570,6 +676,7 @@ public class DragEditor : Editor
     private void OnSceneGUI()
     {
         if (_drag == null) return;
+        serializedObject.Update(); // 场景 GUI 读取前刷新，避免用到过期的序列化数据（预览按旧轴位置渲染）
 
         var senderRoleProp = Get("role");
         if (senderRoleProp != null && senderRoleProp.enumValueIndex == (int)ERole.Sender)
@@ -617,7 +724,7 @@ public class DragEditor : Editor
         bool isCurve = !isRotate && movePath != null && movePath.enumValueIndex == (int)EPath.Curve;
 
         Vector3 start = RefPoint(_drag.target);
-        Vector3 end = isRotate ? start : GetDestinationCenter();
+        Vector3 end = GetDestinationCenter(); // 旋转模式也取终点：GetDestinationCenter 内部已处理绕轴公转后的位置
         Quaternion endRot = GetDestinationRotation();
         Vector3 armEnd = endRot * Quaternion.Inverse(_drag.target.rotation) 
                          * (byCenter ? GetObjectCenter(_drag.target) - _drag.target.position : Vector3.zero);
@@ -626,6 +733,21 @@ public class DragEditor : Editor
         if (previewDestOn)
         {
             DrawMeshWireframe(endPivot, endRot, _drag.target);
+
+            var ghostsProp = Get("previewGhostSteps");
+            int ghostCount = ghostsProp != null ? ghostsProp.intValue : 0;
+            if (ghostCount > 0)
+            {
+                for (int gi = 1; gi <= ghostCount; gi++)
+                {
+                    float gt = gi / (float)(ghostCount + 1);
+                    Vector3 gp = EditorPositionAt(gt, start, end, isRotate, isAxis);
+                    Quaternion gr = EditorRotationAt(gt, isRotate, isAxis);
+                    Vector3 gArm = gr * Quaternion.Inverse(_drag.target.rotation)
+                                   * (byCenter ? GetObjectCenter(_drag.target) - _drag.target.position : Vector3.zero);
+                    DrawMeshWireframe(gp - gArm, gr, _drag.target);
+                }
+            }
         }
 
         var editEndProp = Get("editEndPosition");
@@ -694,21 +816,70 @@ public class DragEditor : Editor
             }
             else
             {
-                // ObjectAlign / Euler: 黄色中心手柄, 整体拖动轴位置
+                // ObjectAlign / Euler: 黄色手柄放在轴中点，整体拖动轴位置
+                // 中点避开物体原生 Gizmo 的轴心抢占；回写用「新手柄位置 - 不含偏移的稳定基准」，
+                // 基准在拖动过程中不变。
                 var offProp = Get("axisPositionOffset");
-                Handles.color = Color.yellow;
-                EditorGUI.BeginChangeCheck();
-                Vector3 newCenter = Handles.PositionHandle(a, Quaternion.identity);
-                if (EditorGUI.EndChangeCheck() && offProp != null)
+                if (offProp != null)
                 {
-                    Undo.RecordObject(_drag, "Move Axis Center");
-                    offProp.vector3Value = offProp.vector3Value + (newCenter - a);
-                    ApplyAxisSceneChange();
+                    Vector3 mid = a + axisDir * axisLen * 0.5f;
+                    Vector3 baseMid = mid - offProp.vector3Value;
+                    Handles.color = Color.yellow;
+                    EditorGUI.BeginChangeCheck();
+                    Vector3 newMid = Handles.PositionHandle(mid, Quaternion.identity);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObject(_drag, "Move Axis Center");
+                        offProp.vector3Value = newMid - baseMid;
+                        ApplyAxisSceneChange();
+                    }
+                    Handles.SphereHandleCap(0, mid, Quaternion.identity, HandleUtility.GetHandleSize(mid) * 0.05f, EventType.Repaint);
+
+                    // 轴长手柄：拖动轴终点调整 axisLength
+                    if (srcMode != (int)EAxisSource.Manual)
+                    {
+                        var alenP = Get("axisLength");
+                        if (alenP != null)
+                        {
+                            Vector3 axisTip = a + axisDir * axisLen;
+                            Handles.color = Color.white;
+                            EditorGUI.BeginChangeCheck();
+                            Vector3 newTip = Handles.FreeMoveHandle(axisTip, HandleUtility.GetHandleSize(axisTip) * 0.07f, Vector3.zero, Handles.SphereHandleCap);
+                            if (EditorGUI.EndChangeCheck())
+                            {
+                                Undo.RecordObject(_drag, "Axis Length");
+                                alenP.floatValue = Mathf.Max(0.01f, Vector3.Dot(newTip - a, axisDir));
+                                ApplyAxisSceneChange();
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        if (isRotate) return;
+        DrawChainPreviews(start);
+
+        if (isRotate)
+        {
+            // 公转弧线：采样参考点绕轴的轨迹
+            if (previewPathOn && isAxis)
+            {
+                EditorComputeAxis(out Vector3 arcAnchor, out Vector3 arcDir, out _);
+                float arcAng = Get("axisAngle") != null ? Get("axisAngle").floatValue : 360f;
+                Vector3 c0 = RefPoint(_drag.target);
+                Handles.color = new Color(0f, 0.75f, 0.75f, 0.9f);
+                const int arcSeg = 48;
+                Vector3 prevPt = c0;
+                for (int i = 1; i <= arcSeg; i++)
+                {
+                    float tt = i / (float)arcSeg;
+                    Vector3 pt = arcAnchor + Quaternion.AngleAxis(arcAng * tt, arcDir) * (c0 - arcAnchor);
+                    Handles.DrawLine(prevPt, pt);
+                    prevPt = pt;
+                }
+            }
+            return;
+        }
 
         if (!previewPathOn) return;
 
@@ -857,7 +1028,266 @@ public class DragEditor : Editor
         return _drag.target.rotation;
     }
 
-    private void DrawMeshWireframe(Vector3 pivotPos, Quaternion rot, Transform src)
+    private Vector3 EditorPositionAt(float t, Vector3 startPos, Vector3 endPos, bool rotate, bool axis)
+    {
+        if (rotate)
+        {
+            if (axis)
+            {
+                EditorComputeAxis(out Vector3 anchor, out Vector3 dir, out _);
+                float ang = Get("axisAngle") != null ? Get("axisAngle").floatValue : 360f;
+                return anchor + Quaternion.AngleAxis(ang * t, dir) * (startPos - anchor);
+            }
+            return startPos;
+        }
+        var destMode = Get("destinationMode");
+        var pts = _drag.pathPoints;
+        if (destMode != null && destMode.enumValueIndex == 2 && pts != null && pts.Length >= 2)
+        {
+            int segments = pts.Length - 1;
+            float scaled = t * segments;
+            int index = Mathf.Clamp(Mathf.FloorToInt(scaled), 0, segments - 1);
+            float localT = scaled - index;
+            Vector3 pa = pts[index] != null ? RefPoint(pts[index]) : startPos;
+            Vector3 pb = pts[index + 1] != null ? RefPoint(pts[index + 1]) : endPos;
+            return Vector3.Lerp(pa, pb, localT);
+        }
+        var mp = Get("movePathMode") ?? Get("movePath");
+        if (mp != null && mp.enumValueIndex == (int)EPath.Curve)
+        {
+            var curveProp = Get("moveCurve");
+            AnimationCurve curve = curveProp != null ? curveProp.animationCurveValue : null;
+            var auto = Get("autoCurveOrigin") ?? Get("autoOrigin");
+            var co = Get("curveOrigin");
+            Vector3 P = (auto != null && auto.boolValue) ? (startPos + endPos) * 0.5f
+                : (co != null ? co.vector3Value : (startPos + endPos) * 0.5f);
+            Vector3 X = startPos - P;
+            Vector3 Y = endPos - P;
+            Vector3 planeNormal = Vector3.Cross(X, Y);
+            if (planeNormal.sqrMagnitude < 1e-6f) planeNormal = Vector3.Cross(X.normalized, Vector3.up);
+            planeNormal.Normalize();
+            Vector3 baselineDir = endPos - startPos;
+            float pathLength = baselineDir.magnitude;
+            baselineDir = (pathLength > 1e-6f) ? baselineDir / pathLength : Vector3.forward;
+            Vector3 perp = Vector3.Cross(baselineDir, planeNormal).normalized;
+            float v0 = (curve != null) ? curve.Evaluate(0f) : 0f;
+            float v1 = (curve != null) ? curve.Evaluate(1f) : 0f;
+            float v = ((curve != null) ? curve.Evaluate(t) : 0f) - Mathf.Lerp(v0, v1, t);
+            return Vector3.Lerp(startPos, endPos, t) + perp * (v * pathLength);
+        }
+        return Vector3.Lerp(startPos, endPos, t);
+    }
+
+    private Quaternion EditorRotationAt(float t, bool rotate, bool axis)
+    {
+        if (rotate)
+        {
+            if (axis)
+            {
+                EditorComputeAxis(out _, out Vector3 axisDir, out _);
+                if (axisDir.sqrMagnitude < 1e-8f) return _drag.target.rotation;
+                float ang = Get("axisAngle") != null ? Get("axisAngle").floatValue : 360f;
+                return _drag.target.rotation * Quaternion.AngleAxis(ang * t, axisDir);
+            }
+            var rvp = Get("rotateVector");
+            Vector3 rv = rvp != null ? rvp.vector3Value : Vector3.zero;
+            return _drag.target.rotation * Quaternion.Euler(rv * t);
+        }
+        var destMode = Get("destinationMode");
+        if (destMode != null && destMode.enumValueIndex == 1 && _drag.destinationTransform != null)
+            return Quaternion.Slerp(_drag.target.rotation, _drag.destinationTransform.rotation, t)
+                   * Quaternion.Euler((Get("relativeRotationOffset")?.vector3Value ?? Vector3.zero) * t);
+        return _drag.target.rotation * Quaternion.Euler((Get("rotationVector")?.vector3Value ?? Vector3.zero) * t);
+    }
+
+    // ============ 连锁预览：显示触发关系图中上下游 Drag 的预览 ============
+
+    private bool ChainContains(Drag a, Drag b)
+    {
+        if (a == null || b == null) return false;
+        if (a.nextOnReach != null)
+            for (int i = 0; i < a.nextOnReach.Length; i++)
+                if (a.nextOnReach[i] == b) return true;
+        if (a.nextOnReturn != null)
+            for (int i = 0; i < a.nextOnReturn.Length; i++)
+                if (a.nextOnReturn[i] == b) return true;
+        return false;
+    }
+
+    private void AddChainEdges(Drag from, Drag[] arr, List<Drag> next, List<Drag> visited, List<Drag[]> edges)
+    {
+        if (arr == null) return;
+        for (int i = 0; i < arr.Length; i++)
+        {
+            Drag t = arr[i];
+            if (t == null || t == _drag || next.Contains(t) || visited.Contains(t)) continue;
+            edges.Add(new[] { from, t });
+            next.Add(t);
+        }
+    }
+
+    // 收集「边」而非「节点」：edges[i] = { 连接线起点, 被渲染的 Drag }，深度按层逐级展开
+    private void CollectRelatedEdges(List<Drag[]> edges, List<Drag> seeds, bool upstream, int depth)
+    {
+        var frontier = new List<Drag>(seeds);
+        var visited = new List<Drag>(seeds);
+        for (int d = 0; d < depth; d++)
+        {
+            var next = new List<Drag>();
+            if (upstream)
+            {
+                Drag[] all = FindObjectsOfType<Drag>(false);
+                for (int i = 0; i < all.Length; i++)
+                {
+                    Drag o = all[i];
+                    if (o == null || visited.Contains(o)) continue;
+                    for (int j = 0; j < frontier.Count; j++)
+                    {
+                        if (ChainContains(o, frontier[j]))
+                        {
+                            edges.Add(new[] { frontier[j], o });
+                            next.Add(o);
+                            break;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (int j = 0; j < frontier.Count; j++)
+                {
+                    Drag f = frontier[j];
+                    if (f == null) continue;
+                    AddChainEdges(f, f.nextOnReach, next, visited, edges);
+                    AddChainEdges(f, f.nextOnReturn, next, visited, edges);
+                }
+            }
+            for (int i = 0; i < next.Count; i++)
+                if (!visited.Contains(next[i])) visited.Add(next[i]);
+            frontier = next;
+            if (frontier.Count == 0) break;
+        }
+    }
+
+    private Vector3 RefPointOf(Drag o)
+    {
+        if (o == null || o.target == null) return Vector3.zero;
+        return o.pathBase == PathBase.Center ? GetObjectCenter(o.target) : o.target.position;
+    }
+
+    private void DrawChainPreviews(Vector3 myPos)
+    {
+        var depthProp = Get("previewRelationDepth");
+        int depth = depthProp != null ? depthProp.intValue : 0;
+        if (depth <= 0) return;
+
+        var seeds = new List<Drag> { _drag };
+        var downEdges = new List<Drag[]>();
+        CollectRelatedEdges(downEdges, seeds, false, depth);
+        var upEdges = new List<Drag[]>();
+        CollectRelatedEdges(upEdges, seeds, true, depth);
+
+        // 下游（本 Drag 触发别人）= 橙；上游（别人触发本 Drag）= 紫
+        Color downColor = new Color(1f, 0.55f, 0.1f);
+        Color upColor = new Color(0.65f, 0.4f, 1f);
+
+        // 连接线从「父节点」画到「子节点」：A→B、B→C 逐级呈现，而不是全部连回 A
+        for (int i = 0; i < downEdges.Count; i++)
+            DrawOtherPreview(downEdges[i][1], downColor, RefPointOf(downEdges[i][0]));
+        for (int i = 0; i < upEdges.Count; i++)
+            DrawOtherPreview(upEdges[i][1], upColor, RefPointOf(upEdges[i][0]));
+    }
+
+    private void DrawOtherPreview(Drag o, Color color, Vector3 fromPos)
+    {
+        if (o == null || o.target == null) return;
+
+        Vector3 oStart = OtherRefPoint(o, o.target);
+        Vector3 oEnd = oStart;
+        Quaternion oEndRot = o.target.rotation;
+
+        bool oRotate = o.motionMode == MotionMode.Rotate;
+        bool oAxis = oRotate && o.rotateMode == RotateMode.Axis;
+        if (oRotate)
+        {
+            if (oAxis)
+            {
+                OtherComputeAxis(o, out Vector3 oAnchor, out Vector3 oDir, oStart);
+                if (oDir.sqrMagnitude > 1e-8f)
+                {
+                    oEnd = oAnchor + Quaternion.AngleAxis(o.axisAngle, oDir) * (oStart - oAnchor);
+                    oEndRot = o.target.rotation * Quaternion.AngleAxis(o.axisAngle, oDir);
+                }
+            }
+            else if (o.rotateMode == RotateMode.Spherical)
+            {
+                oEndRot = o.target.rotation * Quaternion.Euler(o.rotateVector);
+            }
+        }
+        else
+        {
+            oEnd = OtherDestination(o, oStart);
+            if (o.destinationMode == DestinationMode.DestinationTransform && o.destinationTransform != null)
+                oEndRot = o.destinationTransform.rotation * Quaternion.Euler(o.relativeRotationOffset);
+            else
+                oEndRot = o.target.rotation * Quaternion.Euler(o.rotationVector);
+        }
+
+        // 关系连接线 + 起点标记
+        Handles.color = new Color(color.r, color.g, color.b, 0.6f);
+        Handles.DrawDottedLine(fromPos, oStart, 4f);
+        Handles.SphereHandleCap(0, oStart, Quaternion.identity, HandleUtility.GetHandleSize(oStart) * 0.05f, EventType.Repaint);
+
+        // 用对方自己的预览设置
+        bool byC = o.pathBase == PathBase.Center;
+        Vector3 arm = oEndRot * Quaternion.Inverse(o.target.rotation)
+                      * (byC ? GetObjectCenter(o.target) - o.target.position : Vector3.zero);
+        if (o.previewDestination)
+            DrawMeshWireframe(oEnd - arm, oEndRot, o.target, color);
+        if (o.previewPath && !oRotate)
+        {
+            Handles.color = color;
+            Handles.DrawLine(oStart, oEnd);
+        }
+    }
+
+    private Vector3 OtherRefPoint(Drag o, Transform t)
+    {
+        if (t == null) return Vector3.zero;
+        return o.pathBase == PathBase.Center ? GetObjectCenter(t) : t.position;
+    }
+
+    private Vector3 OtherDestination(Drag o, Vector3 oStart)
+    {
+        if (o.destinationMode == DestinationMode.DestinationTransform && o.destinationTransform != null)
+            return OtherRefPoint(o, o.destinationTransform) + o.relativePositionOffset;
+        if (o.destinationMode == DestinationMode.PathPoints && o.pathPoints != null && o.pathPoints.Length > 0
+            && o.pathPoints[o.pathPoints.Length - 1] != null)
+            return OtherRefPoint(o, o.pathPoints[o.pathPoints.Length - 1]);
+        return oStart + o.offsetVector;
+    }
+
+    private void OtherComputeAxis(Drag o, out Vector3 anchor, out Vector3 dir, Vector3 oTargetStart)
+    {
+        if (o.axisSource == AxisSourceMode.ObjectAlign && o.axisObject != null)
+        {
+            Vector3 local = o.axisUp == AxisUp.X ? Vector3.right : (o.axisUp == AxisUp.Z ? Vector3.forward : Vector3.up);
+            dir = (o.axisObject.rotation * local).normalized;
+            anchor = OtherRefPoint(o, o.axisObject) + o.axisPositionOffset;
+            return;
+        }
+        if (o.axisSource == AxisSourceMode.Euler)
+        {
+            dir = (Quaternion.Euler(o.axisEuler) * Vector3.up).normalized;
+            anchor = oTargetStart + o.axisPositionOffset;
+            return;
+        }
+        Vector3 d = o.axisEnd - o.axisStart;
+        dir = (d.sqrMagnitude > 1e-8f) ? d.normalized : Vector3.up;
+        anchor = o.axisStart;
+    }
+
+    private void DrawMeshWireframe(Vector3 pivotPos, Quaternion rot, Transform src, Color? tint = null)
     {
         if (src == null) return;
 
@@ -888,7 +1318,7 @@ public class DragEditor : Editor
         v[6] = m.MultiplyPoint(c + new Vector3( hs.x,  hs.y,  hs.z));
         v[7] = m.MultiplyPoint(c + new Vector3(-hs.x,  hs.y,  hs.z));
 
-        Handles.color = Color.green;
+        Handles.color = tint.HasValue ? tint.Value : Color.green;
         int[][] edges = new int[][]
         {
             new[]{0,1}, new[]{1,2}, new[]{2,3}, new[]{3,0},
