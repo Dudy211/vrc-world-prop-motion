@@ -65,7 +65,7 @@ public enum InteractionMode
 {
     Interact,
     Drag,
-    Proximity
+    Passive
 }
 
 public enum RoleMode
@@ -81,10 +81,19 @@ public enum TriggerMoveMode
     Rail
 }
 
+public enum HoverMode
+{
+    None,
+    Native,
+    Custom
+}
+
 public enum LoopMode
 {
     Loop,
-    PingPong
+    PingPong,
+    Repeat,
+    Once
 }
 
 [UdonBehaviourSyncMode(BehaviourSyncMode.Continuous)]
@@ -104,8 +113,17 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("How to trigger movement")]
     public InteractionMode interactionMode;
 
-    [Tooltip("Trigger object: clicked in Interact mode, grabbed & dragged in Drag mode. Proximity mode: the trigger Collider (Is Trigger) must be on THIS GameObject")]
+    [Tooltip("Trigger object: clicked in Interact mode, grabbed & dragged in Drag mode. Passive mode: the zone below is used instead")]
     public Transform trigger;
+
+    [Tooltip("Passive mode: trigger zone center, local offset from this GameObject (editor auto-syncs a BoxCollider)")]
+    public Vector3 triggerZoneCenter = Vector3.zero;
+
+    [Tooltip("Passive mode: trigger zone size in local meters")]
+    public Vector3 triggerZoneSize = Vector3.one;
+
+    [Tooltip("Internal: whether the zone has been initialized (auto-wrap once)")]
+    public bool triggerZoneInit = false;
 
     [Tooltip("Drag mode: how the trigger handle itself moves (Free = carried by hand; SyncTarget = rigidly follows target; Rail = slides on the rail line)")]
     public TriggerMoveMode triggerMoveMode = TriggerMoveMode.Rail;
@@ -161,6 +179,9 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("Path points (used in PathPoints mode)")]
     public Transform[] pathPoints;
 
+    [Tooltip("PathPoints mode: connect the last point back to the first (closed loop)")]
+    public bool closePath = false;
+
     public MovePathMode movePathMode = MovePathMode.Linear;
 
     [Header("Common")]
@@ -190,6 +211,15 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("Cart on a rigid rail: gravity accelerates downhill / decelerates uphill along the path")]
     public float gravityScale = 1.0f;
 
+    [Tooltip("Minimum seconds between triggers, all trigger methods (0 = no cooldown)")]
+    public float triggerCooldown = 0f;
+
+    [Tooltip("Seconds to wait after a trigger before moving (0 = immediate; Drag mode ignores this)")]
+    public float startDelay = 0f;
+
+    [Tooltip("Master switch for events and Drag chains (off = they never fire)")]
+    public bool useChainEvents = false;
+
     [Tooltip("UdonBehaviour to call OnReachDestination() on when reaching the end")]
     public UdonBehaviour onReachDestination;
 
@@ -205,18 +235,69 @@ public class Drag : UdonSharpBehaviour
     [Tooltip("UdonBehaviours called with OnPathPoint() when passing path point i (PathPoints mode, index matches pathPoints)")]
     public UdonBehaviour[] onPathPointEvents;
 
+    [Tooltip("UdonBehaviour to call OnGrabbed() when the handle is grabbed (all clients)")]
+    public UdonBehaviour onGrabbed;
+    [Tooltip("UdonBehaviour to call OnReleased() when the handle is released (all clients)")]
+    public UdonBehaviour onReleased;
+
+    [Tooltip("Enable sound effects (requires an AudioSource on this GameObject)")]
+    public bool useSounds = false;
+
+    [Tooltip("Played locally when reaching the end (put an AudioSource on this GameObject)")]
+    public AudioClip reachSound;
+    [Tooltip("Played locally when returning to the start")]
+    public AudioClip returnSound;
+    [Tooltip("Played locally when the handle is grabbed")]
+    public AudioClip grabSound;
+    [Tooltip("Played locally when the handle is released")]
+    public AudioClip releaseSound;
+
     [Tooltip("Owner sends sync at most every N frames (1 = every frame)")]
     public int syncEveryNFrames = 1;
 
     [Tooltip("Force a sync when |progress| changed more than this since the last send")]
     public float syncMinDelta = 0.002f;
 
-    [Header("Drag Options")]
     [Tooltip("Drag mode: after release, progress returns to 0 at this speed along the path (units/sec; 0 = stay where released)")]
     public float snapBackSpeed = 0f;
 
     [Tooltip("Drag mode: while someone holds the handle, other players cannot trigger via click / proximity")]
     public bool lockWhileHeld = false;
+
+    [Tooltip("Hover feedback: None / Native (VRChat default prompt, needs Interactive layer) / Custom (raycast + your own visuals)")]
+    public HoverMode hoverMode = HoverMode.None;
+
+    [Tooltip("Shown while the local player aims at the trigger (hidden otherwise); build your own text / outline / glow")]
+    public GameObject hoverVisual;
+
+    [Tooltip("Max hover distance in meters")]
+    public float hoverDistance = 2f;
+
+    [Tooltip("Tint the target's renderers while hovered (per-client, via MaterialPropertyBlock)")]
+    public bool hoverHighlight = false;
+
+    public Color highlightColor = new Color(0.3f, 1f, 1f);
+
+    [Tooltip("Pulse the highlight color")]
+    public bool highlightBlink = true;
+
+    public float highlightBlinkSpeed = 3f;
+
+    [Tooltip("Show a world-space text prompt above the object while hovered (child 'HoverPrompt', auto-created by the editor)")]
+    public bool hoverText = false;
+
+    [Tooltip("Prompt text; empty = USE / 使用 by language")]
+    public string hoverTextContent = "";
+
+    public float hoverTextSize = 0.1f;
+
+    public Color hoverTextColor = Color.white;
+
+    [Tooltip("Extra offset from the auto position (bounds top)")]
+    public Vector3 hoverTextOffset = Vector3.zero;
+
+    [Tooltip("Optional font; null = built-in")]
+    public Font hoverFont;
 
     [Tooltip("Editor: ghost wireframe slices between start and end (0 = off)")]
     public int previewGhostSteps = 0;
@@ -237,6 +318,9 @@ public class Drag : UdonSharpBehaviour
 
     [UdonSynced]
     private int _direction = 1;
+
+    [UdonSynced]
+    private bool _onceDone = false;
 
     private Vector3 _startPosition;
     private Quaternion _startRotation;
@@ -275,6 +359,16 @@ public class Drag : UdonSharpBehaviour
     private int _lastPathSeg = -1;
     private bool _dragEndFired = false;
     private bool _dragStartFired = true;
+    private float _cooldownUntil = 0f;
+    private float _delayRemaining = 0f;
+    private bool _remoteEndPlayed = false;
+    private bool _remoteStartPlayed = false;
+    private AudioSource _audio = null;
+    private bool _hoverShown = false;
+    private bool _zoneInside = false;
+    private Renderer[] _targetRenderers = null;
+    private Color[] _baseColors = null;
+    private GameObject _hoverTextGo = null; // 仅 SetActive/朝向；文字配置由编辑器在编辑时写入
 
     void Start()
     {
@@ -306,9 +400,31 @@ public class Drag : UdonSharpBehaviour
         {
             Debug.LogWarning("[Drag] 拖动模式下，触发物体需要挂 VRC_Pickup（含 Collider + Rigidbody）");
         }
-        if (interactionMode == InteractionMode.Proximity && GetComponent<Collider>() == null)
+        if (hoverVisual != null) hoverVisual.SetActive(false);
+        if (interactionMode == InteractionMode.Passive && role == RoleMode.Receiver && target != null)
         {
-            Debug.LogWarning("[Drag] 靠近触发模式下，本组件所在物体需要有 Collider (Is Trigger)");
+            _zoneInside = IsLocalPlayerInZone(); // 进入沿才触发：出生/传送在区域内不算
+        }
+        if (hoverHighlight && target != null)
+        {
+            _targetRenderers = target.GetComponentsInChildren<Renderer>(false);
+            _baseColors = new Color[_targetRenderers.Length];
+            for (int i = 0; i < _targetRenderers.Length; i++)
+            {
+                Material m = _targetRenderers[i].sharedMaterial;
+                _baseColors[i] = (m != null && m.HasProperty("_Color")) ? m.color : Color.white;
+            }
+        }
+        var htChild = transform.Find("HoverPrompt");
+        if (htChild != null) _hoverTextGo = htChild.gameObject;
+        if (_hoverTextGo != null) _hoverTextGo.SetActive(false);
+        if (useSounds && (reachSound != null || returnSound != null || grabSound != null || releaseSound != null))
+        {
+            _audio = GetComponent<AudioSource>();
+            if (_audio == null)
+            {
+                Debug.LogWarning("[Drag] 配置了音效但本物体没有 AudioSource，请在同一 GameObject 添加 AudioSource");
+            }
         }
         SetupRail();
     }
@@ -387,21 +503,28 @@ public class Drag : UdonSharpBehaviour
 
     public override void OnPlayerTriggerEnter(VRCPlayerApi player)
     {
-        if (role == RoleMode.Sender) return;
-        if (interactionMode != InteractionMode.Proximity) return;
         if (player == null || !player.IsValid() || !player.isLocal) return;
+        if (role == RoleMode.Sender)
+        {
+            // 发送端被动触发：TriggerZone 子物体上的发送端 Drag 收到进入事件后触发本接收端
+            if (receiver != null) receiver.TryStartDrag();
+            return;
+        }
+        if (interactionMode != InteractionMode.Passive) return;
         TryStartDrag();
     }
 
     public void TryStartDrag()
     {
         if (target == null) return;
+        if (loopMode == LoopMode.Once && _onceDone) return; // 单次使命已完成，不再响应
 
         if (lockWhileHeld && _triggerIsPickup && _triggerPickup != null)
         {
             VRCPlayerApi holderNow = _triggerPickup.currentPlayer;
             if (holderNow != null && !holderNow.isLocal) return; // 他人抓住期间禁止远程触发
         }
+        if (triggerCooldown > 0f && Time.time < _cooldownUntil) return; // 触发冷却
 
         VRCPlayerApi localPlayer = Networking.LocalPlayer;
         if (localPlayer != null && !Networking.IsOwner(gameObject))
@@ -411,7 +534,19 @@ public class Drag : UdonSharpBehaviour
         _isOwner = true;
         _v = 0f;
         _snapping = false;
+        _cooldownUntil = Time.time + Mathf.Max(0f, triggerCooldown);
 
+        if (startDelay > 0f && interactionMode != InteractionMode.Drag)
+        {
+            _delayRemaining = Mathf.Max(0f, startDelay);
+            RequestSerialization();
+            return;
+        }
+        StartMotion();
+    }
+
+    private void StartMotion()
+    {
         if (loopMode == LoopMode.PingPong)
         {
             if (!_isMoving)
@@ -425,10 +560,18 @@ public class Drag : UdonSharpBehaviour
             }
             _t = Mathf.Clamp01(_t);
         }
+        else if (loopMode == LoopMode.Repeat)
+        {
+            // 重复：基准固定在 Start 时（CachePositions 已在 Start 执行），
+            // 重触发回到原始起点重播，绝不累加漂移
+            _t = 0f;
+            _isMoving = true;
+            _direction = 1;
+        }
         else
         {
-            // 只有静止时才重取基准：运动中再次触发保留原始起终点、从头重播，
-            // 避免把当前位置当作新起点导致终点漂移
+            // 循环：只有静止时才重取基准（从当前位置续走）；
+            // 运动中再次触发保留原始起终点、从头重播，避免终点漂移
             if (!_isMoving) CachePositions();
             _t = 0f;
             _isMoving = true;
@@ -450,6 +593,7 @@ public class Drag : UdonSharpBehaviour
         _isMoving = false;
         _v = 0f;
         _snapping = false;
+        _onceDone = false; // 外部 SetProgress 可解除单次锁定（重置谜题用）
         _t = Mathf.Clamp01(t);
         ApplyPositionAndRotation(_t);
         RequestSerialization();
@@ -579,17 +723,26 @@ public class Drag : UdonSharpBehaviour
         return (min + max) * 0.5f;
     }
 
+    private int PathSegments()
+    {
+        if (pathPoints == null || pathPoints.Length < 2) return 0;
+        return closePath ? pathPoints.Length : pathPoints.Length - 1;
+    }
+
     private float ComputePathLength()
     {
         if (motionMode == MotionMode.Rotate) return 1f;
         if (destinationMode == DestinationMode.PathPoints && pathPoints != null && pathPoints.Length >= 2)
         {
+            int segments = PathSegments();
             float len = 0f;
-            for (int i = 0; i + 1 < pathPoints.Length; i++)
+            for (int i = 0; i < segments; i++)
             {
-                if (pathPoints[i] != null && pathPoints[i + 1] != null)
+                Transform a = pathPoints[i];
+                Transform b = pathPoints[(i + 1) % pathPoints.Length];
+                if (a != null && b != null)
                 {
-                    len += Vector3.Distance(RefPoint(pathPoints[i]), RefPoint(pathPoints[i + 1]));
+                    len += Vector3.Distance(RefPoint(a), RefPoint(b));
                 }
             }
             return Mathf.Max(len, 0.001f);
@@ -600,12 +753,13 @@ public class Drag : UdonSharpBehaviour
     private int CurrentPathSeg()
     {
         if (destinationMode != DestinationMode.PathPoints || pathPoints == null || pathPoints.Length < 2) return -1;
-        return Mathf.Clamp(Mathf.FloorToInt(_t * (pathPoints.Length - 1)), 0, pathPoints.Length - 2);
+        int segments = PathSegments();
+        return Mathf.Clamp(Mathf.FloorToInt(_t * segments), 0, segments - 1);
     }
 
     private void FirePathPointEvents(int prevSeg, int newSeg)
     {
-        if (onPathPointEvents == null || onPathPointEvents.Length == 0) return;
+        if (!useChainEvents || onPathPointEvents == null || onPathPointEvents.Length == 0) return;
         if (prevSeg < 0 || newSeg <= prevSeg) return;
         for (int k = prevSeg + 1; k <= newSeg && k < onPathPointEvents.Length; k++)
         {
@@ -621,9 +775,26 @@ public class Drag : UdonSharpBehaviour
         if (role == RoleMode.Sender) return;
         if (target == null) return;
 
+        if (hoverMode == HoverMode.Custom) UpdateCustomHover(); // 每个客户端各自检测自己的准星（无同步开销）
+        if (interactionMode == InteractionMode.Passive && role == RoleMode.Receiver)
+        {
+            bool inside = IsLocalPlayerInZone();
+            if (inside && !_zoneInside) TryStartDrag(); // 进入沿触发一次
+            _zoneInside = inside;
+        }
+
         if (!_isOwner)
         {
             UpdateRemoteSmoothing();
+            return;
+        }
+
+        if (_delayRemaining > 0f)
+        {
+            _delayRemaining -= Time.deltaTime;
+            if (_delayRemaining > 0f) return;
+            _delayRemaining = 0f;
+            StartMotion();
             return;
         }
 
@@ -633,9 +804,85 @@ public class Drag : UdonSharpBehaviour
             return;
         }
 
-        if (interactionMode != InteractionMode.Interact) return;
+        if (interactionMode == InteractionMode.Drag) return; // Drag 由把手驱动；Interact/Passive 走自动移动
         if (!_isMoving) return;
         UpdateAutoMovement();
+    }
+
+    // 自定义悬停：本地玩家头部射线命中本物体碰撞体时显示 hoverVisual
+    private void UpdateCustomHover()
+    {
+        if (hoverVisual == null) return;
+        VRCPlayerApi lp = Networking.LocalPlayer;
+        if (lp == null || !lp.IsValid()) return;
+
+        var tracking = lp.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+        bool hit = false;
+        RaycastHit h;
+        if (!Physics.Raycast(tracking.position, tracking.rotation * Vector3.forward, out h, Mathf.Max(0.1f, hoverDistance)))
+        {
+            if (_hoverShown || hoverVisual != null) { } // 未命中：走下方统一处理
+        }
+        else
+        {
+            Collider own = GetComponent<Collider>();
+            if (own != null)
+            {
+                hit = (h.collider == own) || h.collider.transform.IsChildOf(transform);
+            }
+            else if (target != null)
+            {
+                // 本物体无碰撞体：回退检测目标物体（无需 BoxCollider）
+                hit = (h.collider.transform == target) || h.collider.transform.IsChildOf(target);
+            }
+        }
+        if (hoverVisual != null && hit != _hoverShown)
+        {
+            _hoverShown = hit;
+            hoverVisual.SetActive(hit);
+        }
+        ApplyHighlight(hit);
+        ApplyHoverText(hit, lp);
+    }
+
+    private void ApplyHighlight(bool hit)
+    {
+        if (!hoverHighlight || _targetRenderers == null) return;
+        MaterialPropertyBlock block = new MaterialPropertyBlock();
+        float k = 1f;
+        if (highlightBlink)
+            k = 0.5f + 0.5f * Mathf.Sin(Time.time * Mathf.Max(0.1f, highlightBlinkSpeed) * 6.283f);
+        for (int i = 0; i < _targetRenderers.Length; i++)
+        {
+            if (_targetRenderers[i] == null) continue;
+            block.Clear();
+            Color c = hit ? Color.Lerp(_baseColors[i], highlightColor, k) : _baseColors[i];
+            block.SetColor("_Color", c);
+            _targetRenderers[i].SetPropertyBlock(block);
+        }
+    }
+
+    private void ApplyHoverText(bool hit, VRCPlayerApi lp)
+    {
+        if (_hoverTextGo == null) return;
+        if (_hoverTextGo.activeSelf != hit) _hoverTextGo.SetActive(hit);
+        if (!hit) return;
+        var tracking = lp.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+        Vector3 dir = _hoverTextGo.transform.position - tracking.position;
+        if (dir.sqrMagnitude > 1e-6f)
+            _hoverTextGo.transform.rotation = Quaternion.LookRotation(dir);
+    }
+
+    // 被动触发：纯位置检测，无需碰撞体。本地玩家头部位置变换到本地空间后与区域箱体做包含测试。
+    private bool IsLocalPlayerInZone()
+    {
+        VRCPlayerApi lp = Networking.LocalPlayer;
+        if (lp == null || !lp.IsValid() || !lp.isLocal) return false;
+        var tracking = lp.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+        Vector3 local = transform.InverseTransformPoint(tracking.position);
+        return Mathf.Abs(local.x - triggerZoneCenter.x) <= triggerZoneSize.x * 0.5f
+            && Mathf.Abs(local.y - triggerZoneCenter.y) <= triggerZoneSize.y * 0.5f
+            && Mathf.Abs(local.z - triggerZoneCenter.z) <= triggerZoneSize.z * 0.5f;
     }
 
     private void UpdateRemoteSmoothing()
@@ -645,11 +892,18 @@ public class Drag : UdonSharpBehaviour
         _displayT = Mathf.Lerp(_displayT, _remoteT, k);
         if (Mathf.Abs(_displayT - _remoteT) < 0.0005f) _displayT = _remoteT;
         ApplyPositionAndRotation(_displayT);
+
+        // 非主人端到达两端时本地播放音效（到达事件本身仍由主人端经同步/链触发）
+        if (_displayT >= 1f) { if (!_remoteEndPlayed) { _remoteEndPlayed = true; PlayClip(reachSound); } }
+        else _remoteEndPlayed = false;
+        if (_displayT <= 0f) { if (!_remoteStartPlayed) { _remoteStartPlayed = true; PlayClip(returnSound); } }
+        else _remoteStartPlayed = false;
     }
 
     private void UpdateSnapBack()
     {
         if (interactionMode != InteractionMode.Drag) { _snapping = false; return; }
+        if (loopMode == LoopMode.Once && _onceDone) { _snapping = false; return; } // 完成使命不回弹
         if (_triggerPickup != null && _triggerPickup.currentPlayer != null) { _snapping = false; return; }
 
         _t = Mathf.MoveTowards(_t, 0f, snapBackSpeed * Time.deltaTime / Mathf.Max(_pathLength, 0.001f));
@@ -673,7 +927,8 @@ public class Drag : UdonSharpBehaviour
                 trigger.position = _triggerRestPosition + _dragDirection * (_t * _dragLength);
                 trigger.rotation = _triggerRestRotation;
             }
-            if (_triggerRb != null)
+            // VRC_Pickup 抓住期间刚体是 kinematic：此时写速度会每帧刷警告，跳过
+            if (_triggerRb != null && !_triggerRb.isKinematic)
             {
                 _triggerRb.velocity = Vector3.zero;
                 _triggerRb.angularVelocity = Vector3.zero;
@@ -689,7 +944,8 @@ public class Drag : UdonSharpBehaviour
     {
         _framesSinceSync++;
         int interval = syncEveryNFrames < 1 ? 1 : syncEveryNFrames;
-        if (force || _framesSinceSync >= interval || Mathf.Abs(_t - _lastSentT) >= syncMinDelta)
+        float minDelta = Mathf.Max(0f, syncMinDelta);
+        if (force || _framesSinceSync >= interval || Mathf.Abs(_t - _lastSentT) >= minDelta)
         {
             _framesSinceSync = 0;
             _lastSentT = _t;
@@ -712,6 +968,7 @@ public class Drag : UdonSharpBehaviour
             Vector3 actDir = (_effectiveTriggerMode == TriggerMoveMode.Rail) ? _railDirection : _dragDirection;
             float actLen = (_effectiveTriggerMode == TriggerMoveMode.Rail) ? _railLength : _dragLength;
             _triggerStartPosition = trigger.position - actDir * (_t * actLen);
+            InvokeGrabEvent();
         }
         if (holder == Networking.LocalPlayer && !Networking.IsOwner(gameObject))
         {
@@ -727,7 +984,8 @@ public class Drag : UdonSharpBehaviour
             }
             trigger.position = _triggerRestPosition + _railDirection * along;
             trigger.rotation = _triggerRestRotation;
-            if (_triggerRb != null)
+            // VRC_Pickup 抓住期间刚体是 kinematic：此时写速度会每帧刷警告，跳过
+            if (_triggerRb != null && !_triggerRb.isKinematic)
             {
                 _triggerRb.velocity = Vector3.zero;
                 _triggerRb.angularVelocity = Vector3.zero;
@@ -741,7 +999,8 @@ public class Drag : UdonSharpBehaviour
             {
                 trigger.position = target.TransformPoint(_triggerRestLocalPos);
                 trigger.rotation = target.rotation * _triggerRestLocalRot;
-                if (_triggerRb != null)
+                // VRC_Pickup 抓住期间刚体是 kinematic：此时写速度会每帧刷警告，跳过
+                if (_triggerRb != null && !_triggerRb.isKinematic)
                 {
                     _triggerRb.velocity = Vector3.zero;
                     _triggerRb.angularVelocity = Vector3.zero;
@@ -751,6 +1010,7 @@ public class Drag : UdonSharpBehaviour
             {
                 _snapping = true;
             }
+            if (_lastHolder != null) InvokeReleaseEvent();
             _lastHolder = holder;
             return;
         }
@@ -767,9 +1027,13 @@ public class Drag : UdonSharpBehaviour
             _endPosition = GetDestinationPosition();
         }
 
-        float baseSpeed = (speedMode == SpeedMode.Fixed)
-            ? moveSpeed
-            : speedCurve.Evaluate(_t) * moveSpeed;
+        float baseSpeed = moveSpeed;
+        if (speedMode == SpeedMode.Curve && speedCurve != null && speedCurve.length > 0)
+        {
+            // 进度由速度驱动、速度由进度取值：曲线开头为 0 时进度永远停在 0 速度区（死锁）。
+            // 钳到底速 1%：慢速爬过零速区，曲线值上来后自然接管
+            baseSpeed = Mathf.Max(speedCurve.Evaluate(_t), 0.01f) * moveSpeed;
+        }
 
         if (motionMode == MotionMode.Move)
         {
@@ -820,6 +1084,7 @@ public class Drag : UdonSharpBehaviour
     private void UpdateDragMovement()
     {
         if (trigger == null) return;
+        if (loopMode == LoopMode.Once && _onceDone) return; // 拖到位后永久锁定
 
         if (destinationMode == DestinationMode.DestinationTransform && motionMode == MotionMode.Move)
         {
@@ -881,7 +1146,8 @@ public class Drag : UdonSharpBehaviour
         {
             trigger.position = target.TransformPoint(_triggerRestLocalPos);
             trigger.rotation = target.rotation * _triggerRestLocalRot;
-            if (_triggerRb != null)
+            // VRC_Pickup 抓住期间刚体是 kinematic：此时写速度会每帧刷警告，跳过
+            if (_triggerRb != null && !_triggerRb.isKinematic)
             {
                 _triggerRb.velocity = Vector3.zero;
                 _triggerRb.angularVelocity = Vector3.zero;
@@ -895,9 +1161,10 @@ public class Drag : UdonSharpBehaviour
     {
         _isMoving = false;
         _v = 0f;
+        if (loopMode == LoopMode.Once) _onceDone = true; // 到达终点即完成使命
         ApplyPositionAndRotation(_t);
         InvokeReachEvent();
-        if (nextOnReach != null)
+        if (useChainEvents && nextOnReach != null)
         {
             for (int i = 0; i < nextOnReach.Length; i++)
             {
@@ -912,7 +1179,7 @@ public class Drag : UdonSharpBehaviour
         _v = 0f;
         ApplyPositionAndRotation(_t);
         InvokeReturnEvent();
-        if (nextOnReturn != null)
+        if (useChainEvents && nextOnReturn != null)
         {
             for (int i = 0; i < nextOnReturn.Length; i++)
             {
@@ -923,10 +1190,11 @@ public class Drag : UdonSharpBehaviour
 
     private void InvokeReachEvent()
     {
-        if (onReachDestination != null)
+        if (useChainEvents && onReachDestination != null)
         {
             onReachDestination.SendCustomEvent("OnReachDestination");
         }
+        PlayClip(reachSound);
 
         switch (language)
         {
@@ -944,10 +1212,11 @@ public class Drag : UdonSharpBehaviour
 
     private void InvokeReturnEvent()
     {
-        if (onReachStart != null)
+        if (useChainEvents && onReachStart != null)
         {
             onReachStart.SendCustomEvent("OnReachStart");
         }
+        PlayClip(returnSound);
 
         switch (language)
         {
@@ -961,6 +1230,29 @@ public class Drag : UdonSharpBehaviour
                 Debug.Log("[Drag] 已返回起点");
                 break;
         }
+    }
+
+    private void InvokeGrabEvent()
+    {
+        if (useChainEvents && onGrabbed != null) onGrabbed.SendCustomEvent("OnGrabbed");
+        PlayClip(grabSound);
+    }
+
+    private void InvokeReleaseEvent()
+    {
+        if (useChainEvents && onReleased != null) onReleased.SendCustomEvent("OnReleased");
+        PlayClip(releaseSound);
+    }
+
+    private void PlayClip(AudioClip clip)
+    {
+        if (!useSounds) return;
+        if (clip != null && _audio != null) _audio.PlayOneShot(clip);
+    }
+
+    public float GetProgress()
+    {
+        return _t;
     }
 
     private void ApplyPositionAndRotation(float t)
@@ -1053,13 +1345,13 @@ public class Drag : UdonSharpBehaviour
 
     private Vector3 GetPathPointsPosition(float t)
     {
-        int segments = pathPoints.Length - 1;
+        int segments = PathSegments();
         float scaled = t * segments;
         int index = Mathf.Clamp(Mathf.FloorToInt(scaled), 0, segments - 1);
         float localT = scaled - index;
 
         Vector3 a = RefPoint(pathPoints[index]);
-        Vector3 b = RefPoint(pathPoints[index + 1]);
+        Vector3 b = RefPoint(pathPoints[(index + 1) % pathPoints.Length]);
         return Vector3.Lerp(a, b, localT);
     }
 
